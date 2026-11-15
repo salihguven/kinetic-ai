@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+:root {
+  --kinetic-primary: #18181b;
+  --kinetic-accent: #10b981;
+  --kinetic-danger: #ef4444;
+  --kinetic-warning: #f59e0b;
+  --kinetic-surface: #ffffff;
+  --kinetic-bg: #fafafa;
+}
+
+.theme-dark {
+  color-scheme: dark;
+  --kinetic-primary: #ffffff;
+  --kinetic-accent: #10b981;
+  --kinetic-surface: #18181b;
+  --kinetic-bg: #09090b;
+}
+
+.theme-light {
+  color-scheme: light;
+}
+
+body {
+  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  overscroll-behavior: none;
+}
+
+/* Mobil Çentik / Safe Area Koruması */
+.safe-top {
+  padding-top: env(safe-area-inset-top, 0px);
+}
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Dark modda tarayıcı otomatik doldurmanın beyaz patlamasını engelle */
+.theme-dark input:-webkit-autofill,
+.theme-dark input:-webkit-autofill:hover,
+.theme-dark input:-webkit-autofill:focus {
+  -webkit-text-fill-color: #f4f4f5;
+  -webkit-box-shadow: 0 0 0px 1000px #09090b inset;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
+/* Mikro-Animasyonlar */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.animate-fadeIn {
+  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scaleIn {
+  animation: scaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Modern Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(113, 113, 122, 0.35);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(113, 113, 122, 0.6);
+}
