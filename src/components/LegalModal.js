@@ -1,7 +1,7 @@
 // src/components/LegalModal.js
 "use client";
 
-import { X, Shield, Scale, AlertTriangle, Database } from "lucide-react";
+import { X, Shield, Scale, AlertTriangle, Database, ExternalLink } from "lucide-react";
 
 export default function LegalModal({ isOpen, onClose, darkMode, lang = "tr" }) {
   if (!isOpen) return null;
@@ -135,6 +135,36 @@ export default function LegalModal({ isOpen, onClose, darkMode, lang = "tr" }) {
               </li>
             </ul>
           </section>
+
+          {/* Tam sayfa linkleri */}
+          <div className="flex flex-col gap-2 pt-1 sm:flex-row">
+            <a
+              href="/gizlilik-politikasi"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-[11px] font-medium transition ${
+                darkMode
+                  ? "border-zinc-800 hover:bg-zinc-800"
+                  : "border-zinc-300 hover:bg-zinc-100"
+              }`}
+            >
+              {isEn ? "Full Privacy Policy" : "Tam Gizlilik Politikası"}
+              <ExternalLink className="h-3 w-3 opacity-60" />
+            </a>
+            <a
+              href="/kullanim-kosullari"
+              target="_blank"
+              rel="noopener noreferrer"
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl border px-3 py-2.5 text-[11px] font-medium transition ${
+                darkMode
+                  ? "border-zinc-800 hover:bg-zinc-800"
+                  : "border-zinc-300 hover:bg-zinc-100"
+              }`}
+            >
+              {isEn ? "Full Terms of Use" : "Tam Kullanım Koşulları"}
+              <ExternalLink className="h-3 w-3 opacity-60" />
+            </a>
+          </div>
         </div>
 
         <div className="flex items-center justify-between border-t border-zinc-800/40 px-6 py-3.5">

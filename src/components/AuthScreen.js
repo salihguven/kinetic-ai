@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import KineticLogo from "./KineticLogo";
 import LegalModal from "./LegalModal";
+import AuthBackground from "./AuthBackground";
 
 function translateFirebaseError(code) {
   switch (code) {
@@ -45,7 +46,7 @@ function translateFirebaseError(code) {
   }
 }
 
-export default function AuthScreen({ darkMode, setDarkMode }) {
+export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) {
   const [isRegister, setIsRegister] = useState(false);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -122,27 +123,9 @@ export default function AuthScreen({ darkMode, setDarkMode }) {
     ? "border-zinc-800 bg-zinc-950 text-zinc-100 focus:border-zinc-500"
     : "border-zinc-300 bg-zinc-50 text-zinc-900 focus:border-zinc-900";
 
-  return (
-    <div
-      className={`flex min-h-screen flex-col items-center justify-center p-4 transition-colors safe-top safe-bottom ${
-        darkMode
-          ? "theme-dark bg-zinc-950 text-zinc-100"
-          : "theme-light bg-zinc-50 text-zinc-900"
-      }`}
-    >
-      <button
-        onClick={() => setDarkMode(!darkMode)}
-        className={`fixed right-5 top-5 rounded-xl border p-2 transition ${
-          darkMode
-            ? "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
-            : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900"
-        }`}
-        title="Tema Değiştir"
-      >
-        {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-      </button>
-
-      <div className={`w-full max-w-md rounded-2xl border p-7 transition-all ${cardClass}`}>
+  const card = (
+    <div className="relative mx-auto w-full max-w-md">
+      <div className={`rounded-2xl border p-7 backdrop-blur-md transition-all ${cardClass}`}>
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3">
             <KineticLogo size={44} darkMode={darkMode} />
@@ -338,6 +321,38 @@ export default function AuthScreen({ darkMode, setDarkMode }) {
         onClose={() => setIsLegalOpen(false)}
         darkMode={darkMode}
       />
+    </div>
+  );
+
+  // Gömülü mod: LandingContent zaten kendi arka planını, teması ve
+  // header'ını yönetiyor — burada sadece kartı döndürüyoruz.
+  if (embedded) {
+    return card;
+  }
+
+  // Bağımsız (standalone) mod: AuthScreen tek başına tam ekran olarak
+  // kullanılırsa kendi arka planını ve tema butonunu kendisi sağlar.
+  return (
+    <div
+      className={`relative flex min-h-screen flex-col items-center justify-center overflow-hidden p-4 transition-colors safe-top safe-bottom ${
+        darkMode ? "theme-dark bg-zinc-950 text-zinc-100" : "theme-light bg-zinc-50 text-zinc-900"
+      }`}
+    >
+      <AuthBackground darkMode={darkMode} />
+
+      <button
+        onClick={() => setDarkMode(!darkMode)}
+        className={`fixed right-5 top-5 z-10 rounded-xl border p-2 transition ${
+          darkMode
+            ? "border-zinc-800 bg-zinc-900 text-zinc-400 hover:text-white"
+            : "border-zinc-200 bg-white text-zinc-600 hover:text-zinc-900"
+        }`}
+        title="Tema Değiştir"
+      >
+        {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+      </button>
+
+      <div className="relative z-10 w-full">{card}</div>
     </div>
   );
 }
