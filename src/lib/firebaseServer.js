@@ -2,7 +2,6 @@
 // src/lib/firebaseServer.js
 
 import { cert, getApps, initializeApp } from "firebase-admin/app";
-import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
 
 export const DAILY_FAIR_LIMIT = 100;
@@ -48,24 +47,54 @@ function getDb() {
 }
 
 // Firebase kullanıcı doğrulama
-export async function verifyFirebaseToken(idToken) {
-  if (!idToken) return null;
 
-  const auth = getAuth(getAdminApp());
+export async function verifyFirebaseToken(idToken) {
+  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+
+  if (!apiKey || !idToken) return null;
 
   try {
-    const decoded = await auth.verifyIdToken(idToken);
+    const res = await fetch(
+      `https://identitytoolkit.googleapis.com/v1/accounts:lookup?key=${encodeURIComponent(apiKey)}`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ idToken }),
+        cache: "no-store",
+      }
+    );
+
+    if (!res.ok) {
+      console.error(
+        "[FIREBASE AUTH]",
+        res.status,
+        await res.text()
+      );
+      return null;
+    }
+
+    const data = await res.json();
+    const user = data?.users?.[0];
+
+    if (!user?.localId) return null;
 
     return {
-      uid: decoded.uid,
-      email: decoded.email || "",
-      emailVerified: Boolean(decoded.email_verified),
-      name: decoded.name || decoded.email?.split("@")[0] || "Kullanıcı",
+      uid: user.localId,
+      email: user.email || "",
+      emailVerified: Boolean(user.emailVerified),
+      name:
+        user.displayName ||
+        user.email?.split("@")[0] ||
+        "Kullanıcı",
     };
-  } catch {
+  } catch (error) {
+    console.error("[FIREBASE AUTH]", error);
     return null;
   }
 }
+
 
 // Kullanıcı ve moderasyon durumunu getir
 export async function getFirestoreUserStatus(uid) {
