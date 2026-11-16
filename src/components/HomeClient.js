@@ -4,6 +4,7 @@
 import { useState, useEffect, useRef } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import CustomSelect from "@/components/CustomSelect";
+import { readSSE } from "@/lib/sseClient";
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import QuotaCard from "@/components/QuotaCard";
 import AdBanner from "@/components/AdBanner";
@@ -49,7 +50,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import KineticLogo from "@/components/KineticLogo";
-import EmptyStateIllustration from "@/components/EmptyStateIllustration";
+import ChatEmptyState from "@/components/ChatEmptyState";
 import ProviderModal from "@/components/ProviderModal";
 import MarkdownMessage from "@/components/MarkdownMessage";
 import LandingContent from "@/components/LandingContent";
@@ -232,12 +233,12 @@ export default function HomeClient() {
           };
           if (resetNeeded) {
             setDoc(userRef, { dailyCount: 0, lastResetDate: today }, { merge: true }).catch(
-              () => {}
+              () => { }
             );
           }
           setUserProfile(profile);
         } else {
-          setDoc(userRef, baseProfile).catch(() => {});
+          setDoc(userRef, baseProfile).catch(() => { });
           setUserProfile(baseProfile);
         }
       } catch {
@@ -765,6 +766,27 @@ export default function HomeClient() {
     setErrorMsg("");
     setIsLoading(true);
 
+    // Boş bir asistan mesajı hemen ekle, içini akarken dolduracağız.
+    const placeholderIndex = historyToUse.length;
+    appendMessageToChat(targetChatId, {
+      role: "assistant",
+      content: "",
+      providerName: "",
+      streaming: true,
+    });
+
+    const updateStreamingMessage = (updater) => {
+      setChats((prev) =>
+        prev.map((c) => {
+          if (c.id !== targetChatId) return c;
+          const msgs = [...c.messages];
+          if (!msgs[placeholderIndex]) return c;
+          msgs[placeholderIndex] = updater(msgs[placeholderIndex]);
+          return { ...c, messages: msgs };
+        })
+      );
+    };
+
     try {
       const cleanHistory = historyToUse.map((m) => ({
         role: m.role,
@@ -772,45 +794,58 @@ export default function HomeClient() {
         ...(m.images ? { images: m.images } : {}),
       }));
 
-      const lastUserText =
-        [...historyToUse].reverse().find((m) => m.role === "user")?.content || "";
+      const idToken = await firebaseUser.getIdToken();
+      const fallbackProviders = autoFallback
+        ? providers.filter((p) => p.id !== activeProvider.id)
+        : [];
 
-      const firstRes = await runAIRequest({
-        messages: cleanHistory,
-        systemPrompt: effectiveSystemPrompt,
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${idToken}` },
         signal: controller.signal,
+        body: JSON.stringify({
+          provider: activeProvider,
+          fallbackProviders,
+          messages: cleanHistory,
+          systemPrompt: effectiveSystemPrompt,
+          useWebSearch: webSearch,
+          stream: true,
+        }),
       });
 
-      const firstLabel = firstRes.isFallback
-        ? `Yedek AI · ${firstRes.usedProvider} (${firstRes.usedModel})`
-        : `${firstRes.usedProvider} · ${firstRes.usedModel}`;
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `Sunucu hatası (HTTP ${res.status})`);
+      }
 
-      if (!chainMode || !secondaryProvider) {
-        appendMessageToChat(targetChatId, {
-          role: "assistant",
-          content: firstRes.reply,
-          providerName: firstLabel,
-        });
-      } else {
-        appendMessageToChat(targetChatId, {
-          role: "assistant",
-          content: firstRes.reply,
-          providerName: `1. Aşama · ${firstLabel}${firstRes.webSourcesCount > 0 ? " · 🌐 " + firstRes.webSourcesCount + " Kaynak" : ""}`,
-        });
+      let streamError = null;
 
-        const modeConfig = BRIDGE_MODES[bridgeRole] || BRIDGE_MODES.review;
-        const secondRes = await runAIRequest({
-          providerOverride: secondaryProvider,
-          messages: [{ role: "user", content: modeConfig.buildPrompt(lastUserText, firstRes.reply) }],
-          systemPrompt: modeConfig.system,
-          signal: controller.signal,
-        });
+      await readSSE(res, {
+        chunk: ({ text }) => {
+          updateStreamingMessage((msg) => ({ ...msg, content: msg.content + text }));
+        },
+        done: ({ usedProvider, usedModel, isFallback, newDailyCount }) => {
+          const label = isFallback ? `Yedek AI · ${usedProvider} (${usedModel})` : `${usedProvider} · ${usedModel}`;
+          updateStreamingMessage((msg) => ({ ...msg, providerName: label, streaming: false }));
+          if (typeof newDailyCount === "number") {
+            setUserProfile((prev) => (prev ? { ...prev, dailyCount: newDailyCount } : prev));
+          }
+        },
+        error: ({ message }) => {
+          streamError = message;
+        },
+      });
 
-        appendMessageToChat(targetChatId, {
-          role: "assistant",
-          content: secondRes.reply,
-          providerName: `2. Aşama (${modeConfig.label}) · ${secondRes.usedProvider}`,
-        });
+      if (streamError) {
+        updateStreamingMessage((msg) => ({
+          ...msg,
+          streaming: false,
+          // Kısmen içerik geldiyse onu koru, altına açıklayıcı hata ekle.
+          content: msg.content
+            ? `${msg.content}\n\n---\n${streamError}`
+            : streamError,
+          providerName: msg.providerName || "Sistem Mesajı",
+        }));
       }
 
       triggerHaptic("success");
@@ -825,9 +860,52 @@ export default function HomeClient() {
           body: lang === "en" ? "Your AI response is ready." : "Yapay zeka yanıtın hazır.",
         });
       }
+
+      // AI Köprüsü (2. aşama) hâlâ non-stream şekilde çalışıyor.
+      if (chainMode && secondaryProvider) {
+        const firstReplyText = (() => {
+          let latest = "";
+          setChats((prev) => {
+            const c = prev.find((x) => x.id === targetChatId);
+            latest = c?.messages?.[placeholderIndex]?.content || "";
+            return prev;
+          });
+          return latest;
+        })();
+
+        const lastUserText =
+          [...historyToUse].reverse().find((m) => m.role === "user")?.content || "";
+        const modeConfig = BRIDGE_MODES[bridgeRole] || BRIDGE_MODES.review;
+
+        try {
+          const secondRes = await runAIRequest({
+            providerOverride: secondaryProvider,
+            messages: [
+              { role: "user", content: modeConfig.buildPrompt(lastUserText, firstReplyText) },
+            ],
+            systemPrompt: modeConfig.system,
+            signal: controller.signal,
+          });
+
+          appendMessageToChat(targetChatId, {
+            role: "assistant",
+            content: secondRes.reply,
+            providerName: `2. Aşama (${modeConfig.label}) · ${secondRes.usedProvider}`,
+          });
+        } catch (bridgeErr) {
+          if (bridgeErr.name !== "AbortError") {
+            setErrorMsg(formatFriendlyError(bridgeErr.message, lang));
+          }
+        }
+      }
     } catch (err) {
       if (err.name === "AbortError") return;
       triggerHaptic("error");
+      updateStreamingMessage((msg) => ({
+        ...msg,
+        streaming: false,
+        content: msg.content || "",
+      }));
       setErrorMsg(formatFriendlyError(err.message, lang));
     } finally {
       abortControllerRef.current = null;
@@ -919,11 +997,10 @@ export default function HomeClient() {
 
   return (
     <div
-      className={`flex h-screen overflow-hidden transition-colors safe-top safe-bottom ${
-        darkMode
+      className={`flex h-screen overflow-hidden transition-colors safe-top safe-bottom ${darkMode
           ? "theme-dark bg-zinc-950 text-zinc-100"
           : "theme-light bg-zinc-50 text-zinc-900"
-      }`}
+        }`}
     >
       {/* MOBİL OVERLAY */}
       {mobileMenuOpen && (
@@ -935,9 +1012,8 @@ export default function HomeClient() {
 
       {/* SOL KENAR ÇUBUĞU */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-76 flex-col border-r p-4 transition-transform duration-200 safe-top safe-bottom md:static md:w-72 md:translate-x-0 ${
-          mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
-        } ${darkMode ? "border-zinc-800/80 bg-zinc-900" : "border-zinc-200 bg-white"}`}
+        className={`fixed inset-y-0 left-0 z-40 flex w-76 flex-col border-r p-4 transition-transform duration-200 safe-top safe-bottom md:static md:w-72 md:translate-x-0 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+          } ${darkMode ? "border-zinc-800/80 bg-zinc-900" : "border-zinc-200 bg-white"}`}
       >
         {/* Marka & Üst Kontroller */}
         <div className="mb-4 flex items-center justify-between">
@@ -986,45 +1062,41 @@ export default function HomeClient() {
 
         {/* Mod Sekmeleri */}
         <div
-          className={`mb-4 grid grid-cols-3 gap-1 rounded-xl p-1 text-[11px] font-medium ${
-            darkMode ? "bg-zinc-950" : "bg-zinc-100"
-          }`}
+          className={`mb-4 grid grid-cols-3 gap-1 rounded-xl p-1 text-[11px] font-medium ${darkMode ? "bg-zinc-950" : "bg-zinc-100"
+            }`}
         >
           <button
             onClick={() => switchTab("chat")}
-            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${
-              activeTab === "chat"
+            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${activeTab === "chat"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-white text-zinc-900 shadow-sm"
                 : "opacity-60 hover:opacity-100"
-            }`}
+              }`}
           >
             <MessageSquare className="h-3.5 w-3.5" />
             {t.tabChat}
           </button>
           <button
             onClick={() => switchTab("notebook")}
-            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${
-              activeTab === "notebook"
+            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${activeTab === "notebook"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-white text-zinc-900 shadow-sm"
                 : "opacity-60 hover:opacity-100"
-            }`}
+              }`}
           >
             <BookOpen className="h-3.5 w-3.5" />
             {t.tabNotes}
           </button>
           <button
             onClick={() => switchTab("tasks")}
-            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${
-              activeTab === "tasks"
+            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${activeTab === "tasks"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-white text-zinc-900 shadow-sm"
                 : "opacity-60 hover:opacity-100"
-            }`}
+              }`}
           >
             <CheckSquare className="h-3.5 w-3.5" />
             {t.tabTasks}
@@ -1035,11 +1107,10 @@ export default function HomeClient() {
         <div className="mb-3 grid grid-cols-2 gap-2">
           <button
             onClick={handleNewChat}
-            className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${
-              darkMode
+            className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${darkMode
                 ? "border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800"
                 : "border-zinc-300 bg-zinc-50 hover:bg-zinc-100"
-            }`}
+              }`}
           >
             <Plus className="h-3.5 w-3.5" />
             {t.newChat}
@@ -1049,11 +1120,10 @@ export default function HomeClient() {
               triggerHaptic("light");
               setIsModalOpen(true);
             }}
-            className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${
-              darkMode
+            className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${darkMode
                 ? "bg-white text-zinc-950 hover:bg-zinc-200"
                 : "bg-zinc-900 text-white hover:bg-zinc-800"
-            }`}
+              }`}
           >
             <Plus className="h-3.5 w-3.5" />
             {t.connectAI}
@@ -1094,25 +1164,23 @@ export default function HomeClient() {
         <div className="mb-2 flex gap-1 border-b border-zinc-800/50 pb-2 text-[11px] font-medium">
           <button
             onClick={() => setSidebarListTab("chats")}
-            className={`flex-1 rounded-lg py-1.5 transition ${
-              sidebarListTab === "chats"
+            className={`flex-1 rounded-lg py-1.5 transition ${sidebarListTab === "chats"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-zinc-200 text-zinc-900"
                 : "opacity-55 hover:opacity-100"
-            }`}
+              }`}
           >
             {t.chatHistory} ({chats.length})
           </button>
           <button
             onClick={() => setSidebarListTab("models")}
-            className={`flex-1 rounded-lg py-1.5 transition ${
-              sidebarListTab === "models"
+            className={`flex-1 rounded-lg py-1.5 transition ${sidebarListTab === "models"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-zinc-200 text-zinc-900"
                 : "opacity-55 hover:opacity-100"
-            }`}
+              }`}
           >
             Modeller ({providers.length})
           </button>
@@ -1135,13 +1203,12 @@ export default function HomeClient() {
                       setMobileMenuOpen(false);
                     }
                   }}
-                  className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2.5 text-xs transition ${
-                    isCurrent
+                  className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2.5 text-xs transition ${isCurrent
                       ? darkMode
                         ? "bg-zinc-800/80 text-white"
                         : "bg-zinc-200/80 text-zinc-900 font-medium"
                       : "opacity-75 hover:bg-zinc-800/30 hover:opacity-100"
-                  }`}
+                    }`}
                 >
                   <div className="min-w-0">
                     <div className="truncate">{chat.title}</div>
@@ -1177,13 +1244,12 @@ export default function HomeClient() {
                     setActiveProviderId(p.id);
                     setMobileMenuOpen(false);
                   }}
-                  className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2.5 text-xs transition ${
-                    isSelected
+                  className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2.5 text-xs transition ${isSelected
                       ? darkMode
                         ? "bg-emerald-500/10 text-emerald-300"
                         : "bg-zinc-200 text-zinc-900 font-medium"
                       : "opacity-75 hover:bg-zinc-800/30 hover:opacity-100"
-                  }`}
+                    }`}
                 >
                   <div className="min-w-0">
                     <p className="truncate font-medium">{p.name}</p>
@@ -1209,9 +1275,8 @@ export default function HomeClient() {
         <div className="space-y-2">
           {/* Kullanıcı Profili & Çıkış */}
           <div
-            className={`flex items-center justify-between gap-1 rounded-xl border p-2.5 ${
-              darkMode ? "border-zinc-800 bg-zinc-950/70" : "border-zinc-200 bg-zinc-50"
-            }`}
+            className={`flex items-center justify-between gap-1 rounded-xl border p-2.5 ${darkMode ? "border-zinc-800 bg-zinc-950/70" : "border-zinc-200 bg-zinc-50"
+              }`}
           >
             <button
               onClick={() => setIsAccountOpen(true)}
@@ -1264,9 +1329,8 @@ export default function HomeClient() {
       {/* SAĞ ANA ALAN */}
       <main className="flex flex-1 flex-col overflow-hidden">
         <header
-          className={`relative flex min-h-[56px] items-center justify-between border-b px-4 py-2 md:px-6 ${
-            darkMode ? "border-zinc-800/80" : "border-zinc-200 bg-white/70"
-          }`}
+          className={`relative flex min-h-[56px] items-center justify-between border-b px-4 py-2 md:px-6 ${darkMode ? "border-zinc-800/80" : "border-zinc-200 bg-white/70"
+            }`}
         >
           <div className="flex items-center gap-2 text-xs">
             {activeTab !== "chat" ? (
@@ -1294,9 +1358,8 @@ export default function HomeClient() {
                   <span className="text-emerald-400">→ {secondaryProvider.name}</span>
                 )}
                 <span
-                  className={`hidden rounded-md px-2 py-0.5 text-[11px] sm:inline-block ${
-                    darkMode ? "bg-zinc-800 text-zinc-300" : "bg-zinc-200 text-zinc-700"
-                  }`}
+                  className={`hidden rounded-md px-2 py-0.5 text-[11px] sm:inline-block ${darkMode ? "bg-zinc-800 text-zinc-300" : "bg-zinc-200 text-zinc-700"
+                    }`}
                 >
                   {activeProvider.model}
                 </span>
@@ -1309,13 +1372,12 @@ export default function HomeClient() {
           <div className="flex items-center gap-1.5">
             <button
               onClick={handleNotificationRequest}
-              className={`flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border transition ${
-                notificationsEnabled
+              className={`flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg border transition ${notificationsEnabled
                   ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
                   : darkMode
-                  ? "border-zinc-800 text-zinc-400 hover:bg-zinc-800"
-                  : "border-zinc-200 text-zinc-600 hover:bg-zinc-100"
-              }`}
+                    ? "border-zinc-800 text-zinc-400 hover:bg-zinc-800"
+                    : "border-zinc-200 text-zinc-600 hover:bg-zinc-100"
+                }`}
               title={t.notificationsBtn}
             >
               <Bell className="h-4 w-4" />
@@ -1328,13 +1390,12 @@ export default function HomeClient() {
                     triggerHaptic("light");
                     setShowSettingsPanel(!showSettingsPanel);
                   }}
-                  className={`flex min-h-[40px] items-center gap-1.5 rounded-lg border px-3 text-xs transition ${
-                    showSettingsPanel
+                  className={`flex min-h-[40px] items-center gap-1.5 rounded-lg border px-3 text-xs transition ${showSettingsPanel
                       ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-400"
                       : darkMode
-                      ? "border-zinc-800 text-zinc-300 hover:bg-zinc-800"
-                      : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"
-                  }`}
+                        ? "border-zinc-800 text-zinc-300 hover:bg-zinc-800"
+                        : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"
+                    }`}
                 >
                   <Sliders className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">{t.settingsBridge}</span>
@@ -1343,11 +1404,10 @@ export default function HomeClient() {
                 <button
                   onClick={handleExportChat}
                   disabled={messages.length === 0}
-                  className={`flex min-h-[40px] items-center gap-1.5 rounded-lg border px-3 text-xs transition disabled:opacity-30 ${
-                    darkMode
+                  className={`flex min-h-[40px] items-center gap-1.5 rounded-lg border px-3 text-xs transition disabled:opacity-30 ${darkMode
                       ? "border-zinc-800 text-zinc-300 hover:bg-zinc-800"
                       : "border-zinc-200 text-zinc-700 hover:bg-zinc-100"
-                  }`}
+                    }`}
                 >
                   <Download className="h-3.5 w-3.5" />
                   <span className="hidden sm:inline">{t.exportMd}</span>
@@ -1359,11 +1419,10 @@ export default function HomeClient() {
           {/* AÇILIR ASİSTAN & KÖPRÜ PANELİ */}
           {showSettingsPanel && activeTab === "chat" && (
             <div
-              className={`absolute right-4 top-14 z-30 w-80 space-y-3 rounded-2xl border p-4 shadow-2xl animate-scaleIn ${
-                darkMode
+              className={`absolute right-4 top-14 z-30 w-80 space-y-3 rounded-2xl border p-4 shadow-2xl animate-scaleIn ${darkMode
                   ? "border-zinc-800 bg-zinc-900 text-zinc-100"
                   : "border-zinc-200 bg-white text-zinc-900"
-              }`}
+                }`}
             >
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold">{t.settingsBridge}</span>
@@ -1398,9 +1457,8 @@ export default function HomeClient() {
                   value={customInstruction}
                   onChange={(e) => setCustomInstruction(e.target.value)}
                   placeholder="Boş bırakılırsa seçili kişilik uygulanır..."
-                  className={`w-full resize-none rounded-lg border p-2 text-xs outline-none ${
-                    darkMode ? "border-zinc-800 bg-zinc-950" : "border-zinc-300 bg-zinc-50"
-                  }`}
+                  className={`w-full resize-none rounded-lg border p-2 text-xs outline-none ${darkMode ? "border-zinc-800 bg-zinc-950" : "border-zinc-300 bg-zinc-50"
+                    }`}
                 />
               </div>
 
@@ -1486,147 +1544,101 @@ export default function HomeClient() {
             <div className="flex-1 overflow-y-auto px-4 py-6">
               <div className="mx-auto max-w-3xl space-y-6">
                 {messages.length === 0 ? (
-                  <div className="flex min-h-[55vh] flex-col items-center justify-center text-center animate-fadeIn">
-                    <EmptyStateIllustration darkMode={darkMode} />
-                    <h2 className="mb-1.5 text-lg font-semibold">
-                      {t.welcomeTitle}, {userProfile.name}
-                    </h2>
-                    <p className="mb-5 max-w-md text-xs leading-relaxed opacity-65">
-                      {t.welcomeDesc}
-                    </p>
-                    <div className="flex flex-wrap justify-center gap-2.5">
-                      {providers.length === 0 ? (
-                        <button
-                          onClick={() => setIsModalOpen(true)}
-                          className={`flex min-h-[44px] items-center gap-2 rounded-xl px-5 text-xs font-semibold ${
-                            darkMode
-                              ? "bg-white text-zinc-950 hover:bg-zinc-200"
-                              : "bg-zinc-900 text-white hover:bg-zinc-800"
-                          }`}
-                        >
-                          <Plus className="h-4 w-4" />
-                          {t.noModelsCta}
-                        </button>
-                      ) : (
-                        <button
-                          onClick={() => handleSend(t.samplePromptText)}
-                          className={`flex min-h-[44px] items-center gap-2 rounded-xl border px-4 text-xs font-medium transition ${
-                            darkMode
-                              ? "border-zinc-800 bg-zinc-900 hover:bg-zinc-800"
-                              : "border-zinc-300 bg-white hover:bg-zinc-100"
-                          }`}
-                        >
-                          <Sparkles className="h-3.5 w-3.5 text-emerald-400" />
-                          {t.trySamplePrompt}
-                        </button>
-                      )}
-                    </div>
-                  </div>
+                  <ChatEmptyState
+                    userName={userProfile.name}
+                    lang={lang}
+                    darkMode={darkMode}
+                    hasProviders={providers.length > 0}
+                    onOpenProviderModal={() => setIsModalOpen(true)}
+                    onQuickPrompt={(prompt, enablesWeb) => {
+                      if (enablesWeb) setWebSearch(true);
+                      handleSend(prompt);
+                    }}
+                  />
                 ) : (
                   messages.map((msg, idx) => {
+                    const isAssistant = msg.role !== "user";
                     const isLastMessage = idx === messages.length - 1;
+
                     return (
                       <div
-                        key={idx}
-                        className={`flex animate-fadeIn ${
-                          msg.role === "user" ? "justify-end" : "justify-start"
-                        }`}
+                        key={msg.id ?? `${msg.role}-${idx}`}
+                        className={`group flex w-full max-w-2xl gap-3 ${!isAssistant ? "ml-auto justify-end" : ""
+                          }`}
                       >
-                        {msg.role === "user" ? (
+                        {isAssistant && (
                           <div
-                            className={`max-w-xl rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-                              darkMode
-                                ? "bg-zinc-800 text-zinc-100"
-                                : "bg-zinc-900 text-white"
-                            }`}
-                          >
-                            {Array.isArray(msg.attachmentNames) &&
-                              msg.attachmentNames.length > 0 && (
-                                <div className="mb-1.5 flex flex-wrap gap-1.5">
-                                  {msg.attachmentNames.map((fname, fIdx) => (
-                                    <span
-                                      key={fIdx}
-                                      className="rounded-md bg-black/25 px-2 py-0.5 text-[11px]"
-                                    >
-                                      📎 {fname}
-                                    </span>
-                                  ))}
-                                </div>
-                              )}
-                            <div className="whitespace-pre-wrap">{msg.content}</div>
-                          </div>
-                        ) : (
-                          <div className="group flex w-full max-w-2xl gap-3">
-                            <div
-                              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${
-                                darkMode
-                                  ? "border-zinc-800 bg-zinc-900 text-emerald-400"
-                                  : "border-zinc-200 bg-white text-zinc-700"
+                            className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border ${darkMode
+                                ? "border-zinc-800 bg-zinc-900 text-emerald-400"
+                                : "border-zinc-200 bg-white text-zinc-700"
                               }`}
-                            >
-                              <Bot className="h-4 w-4" />
-                            </div>
-                            <div className="min-w-0 flex-1 space-y-1.5">
-                              {msg.providerName && (
-                                <div className="text-[11px] font-medium opacity-50">
-                                  {msg.providerName}
-                                </div>
-                              )}
-                              <MarkdownMessage content={msg.content} darkMode={darkMode} />
-
-                              <div className="flex items-center gap-2 pt-1 opacity-75 transition group-hover:opacity-100">
-                                <button
-                                  onClick={() => handleCopyMessage(msg.content, idx)}
-                                  className="flex min-h-[36px] items-center gap-1 rounded-lg px-2 text-[11px] hover:bg-zinc-800/30"
-                                >
-                                  {copiedIndex === idx ? (
-                                    <>
-                                      <Check className="h-3 w-3 text-emerald-400" />
-                                      <span>{t.copied}</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Copy className="h-3 w-3" />
-                                      <span>{t.copy}</span>
-                                    </>
-                                  )}
-                                </button>
-
-                                {isLastMessage && !isLoading && (
-                                  <button
-                                    onClick={handleRegenerate}
-                                    className="flex min-h-[36px] items-center gap-1 rounded-lg px-2 text-[11px] hover:bg-zinc-800/30"
-                                  >
-                                    <RotateCcw className="h-3 w-3" />
-                                    <span>{t.regenerate}</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
+                          >
+                            <Bot className="h-4 w-4" />
                           </div>
                         )}
+
+                        <div
+                          className={`min-w-0 flex-1 space-y-1.5 ${!isAssistant ? "text-right" : ""
+                            }`}
+                        >
+                          {isAssistant && msg.providerName && (
+                            <div className="text-[11px] font-medium opacity-50">
+                              {msg.providerName}
+                            </div>
+                          )}
+
+                          <MarkdownMessage content={msg.content} darkMode={darkMode} />
+
+                          {msg.streaming && (
+                            <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-emerald-400 align-middle" />
+                          )}
+
+                          {isAssistant && (
+                            <div className="flex items-center gap-2 pt-1 opacity-75 transition group-hover:opacity-100">
+                              <button
+                                onClick={() => handleCopyMessage(msg.content, idx)}
+                                className="flex min-h-[36px] items-center gap-1 rounded-lg px-2 text-[11px] hover:bg-zinc-800/30"
+                              >
+                                {copiedIndex === idx ? (
+                                  <>
+                                    <Check className="h-3 w-3 text-emerald-400" />
+                                    <span>{t.copied}</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-3 w-3" />
+                                    <span>{t.copy}</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {isLastMessage && !isLoading && (
+                                <button
+                                  onClick={handleRegenerate}
+                                  className="flex min-h-[36px] items-center gap-1 rounded-lg px-2 text-[11px] hover:bg-zinc-800/30"
+                                >
+                                  <RotateCcw className="h-3 w-3" />
+                                  <span>{t.regenerate}</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     );
                   })
                 )}
-
-                {isLoading && (
-                  <div className="space-y-3">
-                    <MessageSkeleton darkMode={darkMode} />
-                    {isSlowWait && (
-                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300 animate-fadeIn">
-                        <span>{t.timeoutWarning}</span>
-                        <button
-                          onClick={handleStopGenerating}
-                          className="min-h-[36px] rounded-lg bg-amber-400 px-3 font-semibold text-zinc-950"
-                        >
-                          {t.cancel}
-                        </button>
-                      </div>
-                    )}
+                {isLoading && isSlowWait && (
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300 animate-fadeIn">
+                    <span>{t.timeoutWarning}</span>
+                    <button
+                      onClick={handleStopGenerating}
+                      className="min-h-[36px] rounded-lg bg-amber-400 px-3 font-semibold text-zinc-950"
+                    >
+                      {t.cancel}
+                    </button>
                   </div>
                 )}
-
                 {errorMsg && (
                   <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-xs text-red-400 animate-fadeIn">
                     <div className="flex items-start gap-2">
@@ -1656,11 +1668,10 @@ export default function HomeClient() {
                     {attachments.map((att, idx) => (
                       <div
                         key={idx}
-                        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${
-                          darkMode
+                        className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs ${darkMode
                             ? "border-zinc-800 bg-zinc-900 text-zinc-200"
                             : "border-zinc-300 bg-white text-zinc-800"
-                        }`}
+                          }`}
                       >
                         {att.kind === "image" ? (
                           <ImageIcon className="h-3.5 w-3.5 opacity-70" />
@@ -1682,9 +1693,8 @@ export default function HomeClient() {
                 )}
 
                 <div
-                  className={`flex items-end gap-2 rounded-2xl border p-2 shadow-sm ${
-                    darkMode ? "border-zinc-800 bg-zinc-900/90" : "border-zinc-300 bg-white"
-                  }`}
+                  className={`flex items-end gap-2 rounded-2xl border p-2 shadow-sm ${darkMode ? "border-zinc-800 bg-zinc-900/90" : "border-zinc-300 bg-white"
+                    }`}
                 >
                   <input
                     ref={fileInputRef}
@@ -1712,11 +1722,10 @@ export default function HomeClient() {
                       setWebSearch(!webSearch);
                     }}
                     disabled={isLoading}
-                    className={`flex min-h-[44px] shrink-0 items-center gap-1 rounded-xl px-2.5 text-xs font-medium transition ${
-                      webSearch
+                    className={`flex min-h-[44px] shrink-0 items-center gap-1 rounded-xl px-2.5 text-xs font-medium transition ${webSearch
                         ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-400"
                         : "opacity-60 hover:bg-zinc-800/30 hover:opacity-100"
-                    }`}
+                      }`}
                     title="Canlı Web Arama (Google Haberler & Wikipedia)"
                   >
                     <Globe className="h-4 w-4" />
@@ -1736,11 +1745,10 @@ export default function HomeClient() {
                     <button
                       type="button"
                       onClick={handleStopGenerating}
-                      className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition ${
-                        darkMode
+                      className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition ${darkMode
                           ? "bg-red-500/20 text-red-400 hover:bg-red-500/30"
                           : "bg-red-100 text-red-600 hover:bg-red-200"
-                      }`}
+                        }`}
                       title={t.cancel}
                     >
                       <Square className="h-4 w-4 fill-current" />
@@ -1750,11 +1758,10 @@ export default function HomeClient() {
                       type="button"
                       onClick={() => handleSend()}
                       disabled={!input.trim() && attachments.length === 0}
-                      className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition disabled:opacity-30 ${
-                        darkMode
+                      className={`flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-xl transition disabled:opacity-30 ${darkMode
                           ? "bg-white text-zinc-950 hover:bg-zinc-200"
                           : "bg-zinc-900 text-white hover:bg-zinc-800"
-                      }`}
+                        }`}
                     >
                       <ArrowUp className="h-4 w-4" />
                     </button>

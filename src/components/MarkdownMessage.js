@@ -4,6 +4,8 @@
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import remarkMath from "remark-math";
+import rehypeKatex from "rehype-katex";
 import { Copy, Check } from "lucide-react";
 
 function CodeBlock({ inline, className, children, darkMode }) {
@@ -65,9 +67,14 @@ function CodeBlock({ inline, className, children, darkMode }) {
 
 export default function MarkdownMessage({ content, darkMode }) {
   return (
-    <div className="space-y-3 text-sm leading-relaxed">
+    <div
+      className={`space-y-3 text-sm leading-relaxed ${
+        darkMode ? "katex-dark" : ""
+      }`}
+    >
       <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[rehypeKatex]}
         components={{
           code: (props) => <CodeBlock {...props} darkMode={darkMode} />,
           h1: ({ children }) => (
@@ -77,7 +84,15 @@ export default function MarkdownMessage({ content, darkMode }) {
           ),
           h2: ({ children }) => <h2 className="mt-3.5 text-base font-semibold">{children}</h2>,
           h3: ({ children }) => <h3 className="mt-3 text-sm font-semibold">{children}</h3>,
+          h4: ({ children }) => <h4 className="mt-2.5 text-sm font-semibold opacity-90">{children}</h4>,
           p: ({ children }) => <p className="leading-relaxed">{children}</p>,
+          strong: ({ children }) => (
+            <strong className="font-semibold text-inherit">{children}</strong>
+          ),
+          em: ({ children }) => <em className="italic opacity-90">{children}</em>,
+          del: ({ children }) => (
+            <del className="opacity-55 decoration-2">{children}</del>
+          ),
           ul: ({ children }) => (
             <ul className="my-2 list-disc space-y-1.5 pl-5 marker:text-emerald-400">
               {children}
@@ -88,9 +103,30 @@ export default function MarkdownMessage({ content, darkMode }) {
               {children}
             </ol>
           ),
-          li: ({ children }) => (
-            <li className="pl-1 leading-relaxed [&>p]:my-0 [&>p]:inline">{children}</li>
-          ),
+          li: ({ children, className }) => {
+            const isTaskItem = className?.includes("task-list-item");
+            return (
+              <li
+                className={`pl-1 leading-relaxed [&>p]:my-0 [&>p]:inline ${
+                  isTaskItem ? "list-none pl-0" : ""
+                }`}
+              >
+                {children}
+              </li>
+            );
+          },
+          input: ({ type, checked, disabled }) => {
+            if (type !== "checkbox") return null;
+            return (
+              <input
+                type="checkbox"
+                checked={checked}
+                disabled={disabled}
+                readOnly
+                className="mr-2 h-3.5 w-3.5 accent-emerald-500 align-middle"
+              />
+            );
+          },
           hr: () => (
             <hr className={`my-4 ${darkMode ? "border-zinc-800" : "border-zinc-200"}`} />
           ),
@@ -114,6 +150,16 @@ export default function MarkdownMessage({ content, darkMode }) {
             >
               {children}
             </a>
+          ),
+          img: ({ src, alt }) => (
+            <img
+              src={src}
+              alt={alt || ""}
+              loading="lazy"
+              className={`my-2 max-w-full rounded-xl border ${
+                darkMode ? "border-zinc-800" : "border-zinc-200"
+              }`}
+            />
           ),
           table: ({ children }) => (
             <div

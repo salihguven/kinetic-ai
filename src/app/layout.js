@@ -1,5 +1,6 @@
 // src/app/layout.js
 import { Geist, Geist_Mono } from "next/font/google";
+import "katex/dist/katex.min.css";
 import Script from "next/script";
 import "./globals.css";
 

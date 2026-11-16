@@ -243,3 +243,13 @@ body {
   border: 2px solid rgba(52, 211, 153, 0.5);
   animation: pulseRing 2.4s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
+
+/* KaTeX formüllerini karanlık temaya uyumlu hale getir */
+.katex-dark .katex {
+  color: #f4f4f5;
+}
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.25rem 0;
+}

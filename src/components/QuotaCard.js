@@ -2,7 +2,27 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Zap, Gift, ShieldCheck, Sparkles } from "lucide-react";
+import { Zap, Gift, ShieldCheck, Sparkles, Clock } from "lucide-react";
+
+/**
+ * REKLAM SDK ENTEGRASYON NOKTASI
+ * ---------------------------------
+ * Bir reklam ağı (AdMob H5 Games Ads, AdinPlay, Unity Ads vb.) entegre
+ * edildiğinde, o SDK'nın yüklenme kodunda şunu tanımlaman yeterli:
+ *
+ *   window.__kineticAdSDK = {
+ *     isReady: () => true/false,       // Gösterilecek bir reklam hazır mı?
+ *     show: (onComplete) => {          // Reklamı göster
+ *       // reklam bittiğinde:
+ *       onComplete(true);  // kullanıcı sonuna kadar izlediyse
+ *       onComplete(false); // erken kapattıysa / başarısızsa
+ *     },
+ *   };
+ *
+ * Bu obje tanımlı ve isReady() true dönene kadar, buton devre dışı
+ * kalır ve kullanıcıya "reklam şu anda mevcut değil" gösterilir.
+ * Sahte/simüle edilmiş bir ödül ASLA verilmez.
+ */
 
 export default function QuotaCard({
   dailyCount = 0,
@@ -15,6 +35,7 @@ export default function QuotaCard({
   const [bonusLoading, setBonusLoading] = useState(false);
   const [bonusClaimed, setBonusClaimed] = useState(false);
   const [resetTimeText, setResetTimeText] = useState("");
+  const [adReady, setAdReady] = useState(false);
 
   const remaining = Math.max(0, dailyLimit - dailyCount);
   const percentage = Math.min(100, Math.round((dailyCount / dailyLimit) * 100));
@@ -35,15 +56,34 @@ export default function QuotaCard({
     return () => clearInterval(interval);
   }, []);
 
-  // Reklam İzle / Sponsor Görerek +25 İstek Kazan Simülasyonu
+  // Gerçek reklam SDK'sının hazır olup olmadığını periyodik kontrol et
+  useEffect(() => {
+    const checkAdReady = () => {
+      const sdk = typeof window !== "undefined" ? window.__kineticAdSDK : null;
+      const ready = Boolean(
+        sdk && typeof sdk.isReady === "function" && sdk.isReady()
+      );
+      setAdReady(ready);
+    };
+
+    checkAdReady();
+    const interval = setInterval(checkAdReady, 4000);
+    return () => clearInterval(interval);
+  }, []);
+
   const handleWatchAdBonus = () => {
+    const sdk = typeof window !== "undefined" ? window.__kineticAdSDK : null;
+    if (!sdk || typeof sdk.show !== "function" || !adReady) return;
+
     setBonusLoading(true);
-    setTimeout(() => {
+    sdk.show((success) => {
       setBonusLoading(false);
-      setBonusClaimed(true);
-      if (onBonusEarned) onBonusEarned(25);
-      setTimeout(() => setBonusClaimed(false), 3500);
-    }, 2500);
+      if (success) {
+        setBonusClaimed(true);
+        if (onBonusEarned) onBonusEarned(25);
+        setTimeout(() => setBonusClaimed(false), 3500);
+      }
+    });
   };
 
   // Doluluk rengi
@@ -89,18 +129,32 @@ export default function QuotaCard({
         ) : (
           <button
             type="button"
-            disabled={bonusLoading}
+            disabled={bonusLoading || !adReady}
             onClick={handleWatchAdBonus}
+            title={
+              !adReady
+                ? "Reklam sağlayıcısı henüz bağlı değil veya şu anda gösterilecek reklam yok."
+                : undefined
+            }
             className={`flex min-h-[32px] w-full items-center justify-center gap-1.5 rounded-lg border text-[11px] font-medium transition ${
-              darkMode
+              !adReady
+                ? "cursor-not-allowed border-zinc-700/40 text-zinc-500 opacity-50"
+                : darkMode
                 ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
                 : "border-emerald-600/30 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
             }`}
           >
-            <Gift className="h-3.5 w-3.5" />
-            {bonusLoading
-              ? "Sponsor Yükleniyor..."
-              : "+25 Ekstra İstek Kazan (Reklam)"}
+            {!adReady ? (
+              <>
+                <Clock className="h-3.5 w-3.5" />
+                Reklam Şu An Mevcut Değil
+              </>
+            ) : (
+              <>
+                <Gift className="h-3.5 w-3.5" />
+                {bonusLoading ? "Sponsor Yükleniyor..." : "+25 Ekstra İstek Kazan (Reklam)"}
+              </>
+            )}
           </button>
         )}
       </div>
