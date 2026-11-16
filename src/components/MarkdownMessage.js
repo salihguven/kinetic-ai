@@ -68,7 +68,7 @@ function CodeBlock({ inline, className, children, darkMode }) {
 export default function MarkdownMessage({ content, darkMode }) {
   return (
     <div
-      className={`space-y-3 text-sm leading-relaxed ${
+      className={`min-w-0 max-w-full space-y-3 break-words text-sm leading-relaxed [overflow-wrap:anywhere] ${
         darkMode ? "katex-dark" : ""
       }`}
     >

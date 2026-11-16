@@ -1,66 +1,49 @@
-
 import { readFileSync } from "node:fs";
-import { cert, getApps, initializeApp } from "firebase-admin/app";
+import { cert, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 
 const serviceAccount = JSON.parse(
-  readFileSync(
-    new URL("../secrets/service-account.json", import.meta.url),
-    "utf8"
-  )
+  readFileSync(new URL("../secrets/service-account.json", import.meta.url), "utf8")
 );
+serviceAccount.private_key = serviceAccount.private_key?.replace(/\\n/g, "\n");
 
-const app = getApps()[0] || initializeApp({
+const appName = "kinetic-role-assignment";
+const app = initializeApp({
   credential: cert(serviceAccount),
-  projectId: "kineticai-4a5d6",
-});
-
+  projectId: serviceAccount.project_id,
+}, appName);
 const auth = getAuth(app);
 
-const ADMIN_EMAIL = "minecraftbruh5050@gmail.com";
-const TESTER_EMAIL = "hasansungur655@gmail.com";
+const FOUNDER_EMAIL = "minecraftbruh5050@gmail.com";
+const ADMIN_EMAIL = "hasansungur655@gmail.com";
 
-const adminUser = await auth.getUserByEmail(ADMIN_EMAIL);
-const testerUser = await auth.getUserByEmail(TESTER_EMAIL);
+const founder = await auth.getUserByEmail(FOUNDER_EMAIL);
+const admin = await auth.getUserByEmail(ADMIN_EMAIL);
 
-let pageToken;
-let count = 0;
+if (founder.uid === admin.uid) {
+  throw new Error("Kurucu ve admin e-posta adresleri farklı hesaplara ait olmalı.");
+}
 
-do {
-  const page = await auth.listUsers(1000, pageToken);
+async function assignClaims(user, claims) {
+  await auth.setCustomUserClaims(user.uid, {
+    ...(user.customClaims || {}),
+    ...claims,
+  });
+  const updated = await auth.getUser(user.uid);
+  return updated.customClaims || {};
+}
 
-  for (const user of page.users) {
-    const isAdmin = user.uid === adminUser.uid;
-    const isTester = user.uid === testerUser.uid;
+const founderClaims = await assignClaims(founder, {
+  admin: true,
+  founder: true,
+  tester: false,
+});
+const adminClaims = await assignClaims(admin, {
+  admin: true,
+  founder: false,
+  tester: false,
+});
 
-    const claims = {
-      ...(user.customClaims || {}),
-      admin: isAdmin,
-      tester: isTester,
-    };
-
-    await auth.setCustomUserClaims(user.uid, claims);
-
-    if (isAdmin) {
-      console.log("ADMIN:", user.email);
-    }
-
-    if (isTester) {
-      console.log("TESTER:", user.email);
-    }
-
-    count++;
-  }
-
-  pageToken = page.pageToken;
-} while (pageToken);
-
-console.log("Yetkiler güncellendi.");
-console.log("Kontrol edilen hesap sayısı:", count);
-
-const check = await auth.getUserByEmail(
-  "minecraftbruh5050@gmail.com"
-);
-
-console.log("ADMIN CLAIM:", check.customClaims?.admin);
-console.log("TESTER CLAIM:", check.customClaims?.tester);
+console.log("Yetkiler yalnızca belirtilen iki hesaba atandı.");
+console.log(`${FOUNDER_EMAIL}: founder=${founderClaims.founder === true}, admin=${founderClaims.admin === true}`);
+console.log(`${ADMIN_EMAIL}: admin=${adminClaims.admin === true}, founder=${adminClaims.founder === true}`);

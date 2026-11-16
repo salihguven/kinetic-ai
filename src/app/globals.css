@@ -1,26 +1,48 @@
 @import "tailwindcss";
 
 :root {
-  --kinetic-primary: #18181b;
-  --kinetic-accent: #10b981;
-  --kinetic-danger: #ef4444;
-  --kinetic-warning: #f59e0b;
-  --kinetic-surface: #ffffff;
-  --kinetic-bg: #fafafa;
+  color-scheme: light;
+  --kinetic-primary: #20242b;
+  --kinetic-accent: #047857;
+  --kinetic-danger: #b42332;
+  --kinetic-warning: #a75b08;
+  --kinetic-success: #087e5b;
+  --kinetic-info: #1769aa;
+  --kinetic-surface: #e4e7ec;
+  --kinetic-surface-raised: #eff1f4;
+  --kinetic-bg: #d9dde4;
+  --kinetic-border: #c4cad3;
+  --kinetic-muted: #5e6673;
 }
 
 .theme-dark {
   color-scheme: dark;
   --kinetic-primary: #ffffff;
   --kinetic-accent: #10b981;
+  --kinetic-danger: #f87171;
+  --kinetic-warning: #fbbf24;
+  --kinetic-success: #34d399;
+  --kinetic-info: #60a5fa;
   --kinetic-surface: #18181b;
+  --kinetic-surface-raised: #202024;
   --kinetic-bg: #09090b;
+  --kinetic-border: #303036;
+  --kinetic-muted: #a1a1aa;
 }
 
 .theme-light {
   color-scheme: light;
-  --kinetic-surface: #e5e7eb;
-  --kinetic-bg: #dfe2e7;
+  --kinetic-primary: #20242b;
+  --kinetic-accent: #047857;
+  --kinetic-danger: #b42332;
+  --kinetic-warning: #a75b08;
+  --kinetic-success: #087e5b;
+  --kinetic-info: #1769aa;
+  --kinetic-surface: #e4e7ec;
+  --kinetic-surface-raised: #eff1f4;
+  --kinetic-bg: #d9dde4;
+  --kinetic-border: #c4cad3;
+  --kinetic-muted: #5e6673;
   background-color: var(--kinetic-bg);
 }
 
@@ -29,24 +51,42 @@
 
 .theme-light aside,
 .theme-light header {
-  background-color: #e7e9ed !important;
+  background-color: #e1e4e9 !important;
 }
 
 .theme-light [class~="bg-white"] {
-  background-color: #f0f1f3 !important;
+  background-color: var(--kinetic-surface-raised) !important;
 }
 
 .theme-light input,
 .theme-light textarea {
-  background-color: #e8eaee;
+  background-color: #e7e9ee;
 }
 
-.theme-light [class~="bg-zinc-100"] { background-color: #e1e4e9 !important; }
-.theme-light [class~="bg-zinc-200"] { background-color: #d5d9e0 !important; }
+.theme-light [class~="bg-zinc-100"] { background-color: #e5e8ed !important; }
+.theme-light [class~="bg-zinc-200"] { background-color: #d2d7df !important; }
 
 body {
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
   overscroll-behavior: none;
+}
+
+button,
+a,
+input,
+textarea,
+select {
+  -webkit-tap-highlight-color: transparent;
+}
+
+:focus-visible {
+  outline: 2px solid var(--kinetic-accent);
+  outline-offset: 2px;
+}
+
+.touch-target {
+  min-width: 48px;
+  min-height: 48px;
 }
 
 /* Mobil Çentik / Safe Area Koruması */

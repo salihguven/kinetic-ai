@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import AuthScreen from "./AuthScreen";
 import KineticLogo from "./KineticLogo";
+import BetaBadge from "./BetaBadge";
 import AuthBackground from "./AuthBackground";
 import Reveal from "./Reveal";
 
@@ -71,6 +72,7 @@ export default function LandingContent({ darkMode, setDarkMode }) {
           <div className="flex items-center gap-2 animate-fadeSlideUp">
             <KineticLogo size={30} darkMode={darkMode} />
             <span className="text-sm font-bold">KineticAI</span>
+            <BetaBadge darkMode={darkMode} />
           </div>
           <button
             onClick={() => setDarkMode(!darkMode)}

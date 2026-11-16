@@ -5,18 +5,20 @@ import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { readFileSync } from "node:fs";
 import { getFirestore } from "firebase-admin/firestore";
+import { resetMonthlyQuotaTransaction } from "@/lib/quotaReset";
+import { recordProviderTokenUsageTransaction } from "@/lib/tokenUsage";
 
 export const DAILY_FAIR_LIMIT = 100;
 export const MAX_WARNINGS = 3;
 export const BAN_DURATION_MS = 3 * 60 * 1000;
 
-export function getTodayKey() {
+export function getTodayKey(now = new Date()) {
   const parts = new Intl.DateTimeFormat("en-CA", {
     timeZone: "Europe/Istanbul",
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-  }).formatToParts(new Date());
+  }).formatToParts(now);
   const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
   return `${values.year}-${values.month}-${values.day}`;
 }
@@ -76,7 +78,7 @@ function getDb() {
 }
 
 // Firebase Admin Auth
-function getAdminAuth() {
+export function getAdminAuth() {
   return getAuth(getAdminApp());
 }
 
@@ -103,6 +105,7 @@ export async function verifyFirebaseToken(idToken) {
 
       // Admin yetkisi yalnızca Firebase Custom Claims üzerinden.
       isAdmin: decoded.admin === true,
+      isFounder: decoded.founder === true,
       isTester: decoded.tester === true,
     };
   } catch (error) {
@@ -131,6 +134,7 @@ export async function getFirestoreUserStatus(uid) {
 
   const moderationBlocked = moderationBanUntil > now;
   const lastResetDate = data.lastResetDate || today;
+  const hasCurrentTokenUsage = data.tokenUsageDate === today;
 
   return {
     dailyCount:
@@ -158,11 +162,27 @@ export async function getFirestoreUserStatus(uid) {
 
     banned: Boolean(data.banned),
     banReason: data.banReason || "",
+    monthlyQuotaResetMonth: data.monthlyQuotaResetMonth || null,
+    tokenUsageDate: hasCurrentTokenUsage ? today : null,
+    dailyTokenUsage: hasCurrentTokenUsage
+      ? {
+          inputTokens: Number(data.dailyTokenUsage?.inputTokens || 0),
+          outputTokens: Number(data.dailyTokenUsage?.outputTokens || 0),
+          totalTokens: Number(data.dailyTokenUsage?.totalTokens || 0),
+        }
+      : { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+    tokenUsageByModel: hasCurrentTokenUsage && data.tokenUsageByModel && typeof data.tokenUsageByModel === "object"
+      ? Object.fromEntries(Object.entries(data.tokenUsageByModel).slice(0, 16))
+      : {},
 
     // Bu alan sadece profil bilgisidir.
     // Admin yetkilendirmesinde KULLANILMAZ.
     role: "user",
   };
+}
+
+export async function recordProviderTokenUsage(uid, providerType, model, usage) {
+  return recordProviderTokenUsageTransaction(getDb(), uid, providerType, model, usage);
 }
 
 // Günlük kullanım sayacı
@@ -217,6 +237,10 @@ export async function releaseFirestoreUsage(uid) {
     transaction.set(ref, { dailyCount: next, lastResetDate: today }, { merge: true });
     return next;
   });
+}
+
+export async function resetMonthlyQuota(uid, now = new Date()) {
+  return resetMonthlyQuotaTransaction(getDb(), uid, now);
 }
 
 export async function deleteFirebaseAccount(uid) {

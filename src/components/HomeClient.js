@@ -6,9 +6,10 @@ import { onAuthStateChanged, signOut } from "firebase/auth";
 import CustomSelect from "@/components/CustomSelect";
 import { readSSE } from "@/lib/sseClient";
 import { doc, getDoc } from "firebase/firestore";
-import QuotaCard from "@/components/QuotaCard";
+import BetaBadge from "@/components/BetaBadge";
 import { auth, db } from "@/lib/firebase";
 import { TRANSLATIONS } from "@/lib/i18n";
+import { getMonthlyQuotaResetStatus } from "@/lib/quotaReset";
 import {
   triggerHaptic,
   formatRelativeTime,
@@ -50,6 +51,12 @@ import {
   Globe,
   Sparkles,
   ArrowLeft,
+  ArrowDown,
+  UserRound,
+  ChevronUp,
+  ChevronDown,
+  Settings,
+  Brain,
 } from "lucide-react";
 import KineticLogo from "@/components/KineticLogo";
 import ChatEmptyState from "@/components/ChatEmptyState";
@@ -63,7 +70,9 @@ import TaskManager from "@/components/TaskManager";
 import ConfirmModal from "@/components/ConfirmModal";
 import PermissionModal from "@/components/PermissionModal";
 import UpdatesModal from "@/components/UpdatesModal";
+import SettingsStudio from "@/components/SettingsStudio";
 import { AppBootSkeleton, MessageSkeleton } from "@/components/SkeletonLoader";
+import { getReasoningSupport, normalizeReasoningLevel } from "@/lib/reasoning";
 
 const ASSISTANT_PRESETS = {
   general: {
@@ -111,6 +120,8 @@ const BRIDGE_MODES = {
   },
 };
 
+const getCurrentTimestamp = () => Date.now();
+
 function createEmptyChat() {
   return {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
@@ -131,6 +142,19 @@ function getTodayKey() {
   return `${values.year}-${values.month}-${values.day}`;
 }
 
+function applyTokenUsage(profile, dailyTokenUsage, modelTokenUsage) {
+  if (!profile || !dailyTokenUsage) return profile;
+  const { key, ...modelUsage } = modelTokenUsage || {};
+  return {
+    ...profile,
+    tokenUsageDate: getTodayKey(),
+    dailyTokenUsage,
+    tokenUsageByModel: key
+      ? { ...(profile.tokenUsageByModel || {}), [key]: modelUsage }
+      : (profile.tokenUsageByModel || {}),
+  };
+}
+
 export default function HomeClient() {
   const [firebaseUser, setFirebaseUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
@@ -139,8 +163,12 @@ export default function HomeClient() {
   const [lang, setLang] = useState("tr");
   const [darkMode, setDarkMode] = useState(true);
   const [activeTab, setActiveTab] = useState("chat");
-  const [sidebarListTab, setSidebarListTab] = useState("chats");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [accountMenuOpen, setAccountMenuOpen] = useState(false);
+  const [isConnectionManagerOpen, setIsConnectionManagerOpen] = useState(false);
+  const [refreshingProviderId, setRefreshingProviderId] = useState("");
+  const [connectionNotice, setConnectionNotice] = useState("");
+  const [connectionNoticeIsError, setConnectionNoticeIsError] = useState(false);
 
   const [providers, setProviders] = useState([]);
   const [chats, setChats] = useState([]);
@@ -151,10 +179,13 @@ export default function HomeClient() {
   const [isLoaded, setIsLoaded] = useState(false);
 
   const [activeProviderId, setActiveProviderId] = useState("");
+  const [reasoningLevel, setReasoningLevel] = useState("auto");
+  const [reasoningLoaded, setReasoningLoaded] = useState(false);
   const [secondaryProviderId, setSecondaryProviderId] = useState("");
   const [chainMode, setChainMode] = useState(false);
   const [bridgeRole, setBridgeRole] = useState("review");
   const [autoFallback, setAutoFallback] = useState(true);
+  const [assistantSettingsLoaded, setAssistantSettingsLoaded] = useState(false);
 
   const [assistantPreset, setAssistantPreset] = useState("general");
   const [customInstruction, setCustomInstruction] = useState("");
@@ -165,6 +196,10 @@ export default function HomeClient() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSlowWait, setIsSlowWait] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
+  const [errorCode, setErrorCode] = useState("");
+  const [quotaResetLoading, setQuotaResetLoading] = useState(false);
+  const [quotaResetError, setQuotaResetError] = useState("");
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [copiedIndex, setCopiedIndex] = useState(null);
   const [webSearch, setWebSearch] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -180,19 +215,75 @@ export default function HomeClient() {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [confirmState, setConfirmState] = useState({ open: false });
 
-  const messagesEndRef = useRef(null);
+  const chatScrollRef = useRef(null);
+  const chatAtBottomRef = useRef(true);
+  const accountMenuRef = useRef(null);
+  const voiceSegmentsRef = useRef([]);
+  const voiceBaseInputRef = useRef("");
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
   const speechRecognitionRef = useRef(null);
 
   useEffect(() => () => speechRecognitionRef.current?.stop(), []);
 
+  useEffect(() => {
+    if (!accountMenuOpen) return;
+    const closeOnOutside = (event) => {
+      if (!accountMenuRef.current?.contains(event.target)) setAccountMenuOpen(false);
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setAccountMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", closeOnOutside);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnOutside);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [accountMenuOpen]);
+
+  useEffect(() => {
+    document.documentElement.lang = lang;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      "content",
+      darkMode ? "#09090b" : "#d9dde4"
+    );
+  }, [lang, darkMode]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try {
+        setReasoningLevel(normalizeReasoningLevel(localStorage.getItem("kinetic_ai_reasoning_level")));
+      } catch {
+        setReasoningLevel("auto");
+      } finally {
+        setReasoningLoaded(true);
+      }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!reasoningLoaded) return;
+    try {
+      localStorage.setItem("kinetic_ai_reasoning_level", reasoningLevel);
+    } catch {
+      // The current selection still applies for this page session.
+    }
+  }, [reasoningLevel, reasoningLoaded]);
+
   const t = TRANSLATIONS[lang] || TRANSLATIONS.tr;
+  const monthlyQuotaReset = getMonthlyQuotaResetStatus(userProfile || {}, new Date(clockNow || 0));
   const optClass = darkMode ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900";
   const normalizedChatSearch = chatSearch.trim().toLocaleLowerCase(lang === "tr" ? "tr-TR" : "en-US");
   const remainingSec = banUntil
     ? Math.max(0, Math.ceil((banUntil - clockNow) / 1000))
     : 0;
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setClockNow(Date.now()), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
   const filteredChats = chats.filter((chat) =>
     `${chat.title} ${chat.messages?.map((message) => message.content).join(" ") || ""}`
       .toLocaleLowerCase(lang === "tr" ? "tr-TR" : "en-US")
@@ -217,6 +308,10 @@ export default function HomeClient() {
         email: user.email || "",
         dailyCount: 0,
         lastResetDate: today,
+        monthlyQuotaResetMonth: null,
+        tokenUsageDate: today,
+        dailyTokenUsage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
+        tokenUsageByModel: {},
         banned: false,
         banReason: "",
       };
@@ -254,6 +349,14 @@ export default function HomeClient() {
             name: data.name || baseProfile.name,
             dailyCount: data.lastResetDate === today ? Number(data.dailyCount || 0) : 0,
             lastResetDate: today,
+            monthlyQuotaResetMonth: data.monthlyQuotaResetMonth || null,
+            tokenUsageDate: data.tokenUsageDate === today ? today : null,
+            dailyTokenUsage: data.tokenUsageDate === today
+              ? data.dailyTokenUsage || baseProfile.dailyTokenUsage
+              : baseProfile.dailyTokenUsage,
+            tokenUsageByModel: data.tokenUsageDate === today && data.tokenUsageByModel
+              ? data.tokenUsageByModel
+              : {},
             banned: Boolean(data.banned),
             banReason: data.banReason || "Topluluk kurallarını ihlal ettiniz.",
           };
@@ -282,8 +385,27 @@ export default function HomeClient() {
       const savedTheme = localStorage.getItem("kinetic_ai_theme");
       if (savedTheme === "light") setDarkMode(false);
 
+      const savedAssistantSettings = localStorage.getItem("kinetic_ai_assistant_settings");
+      if (savedAssistantSettings) {
+        try {
+          const parsed = JSON.parse(savedAssistantSettings);
+          if (parsed && typeof parsed === "object") {
+            if (Object.hasOwn(ASSISTANT_PRESETS, parsed.assistantPreset)) setAssistantPreset(parsed.assistantPreset);
+            if (typeof parsed.customInstruction === "string") setCustomInstruction(parsed.customInstruction.slice(0, 3000));
+            if (typeof parsed.autoFallback === "boolean") setAutoFallback(parsed.autoFallback);
+            if (typeof parsed.chainMode === "boolean") setChainMode(parsed.chainMode);
+            if (Object.hasOwn(BRIDGE_MODES, parsed.bridgeRole)) setBridgeRole(parsed.bridgeRole);
+            if (typeof parsed.secondaryProviderId === "string") setSecondaryProviderId(parsed.secondaryProviderId);
+          }
+        } catch {
+          localStorage.removeItem("kinetic_ai_assistant_settings");
+        }
+      }
+      setAssistantSettingsLoaded(true);
+
+      const notificationPreference = localStorage.getItem("kinetic_ai_notifications");
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        setNotificationsEnabled(true);
+        setNotificationsEnabled(notificationPreference !== "off");
       }
 
       const savedProviders = localStorage.getItem("kinetic_ai_providers");
@@ -330,6 +452,22 @@ export default function HomeClient() {
       // ignore
     }
   }, [providers, lang, darkMode, isLoaded]);
+
+  useEffect(() => {
+    if (!assistantSettingsLoaded) return;
+    try {
+      localStorage.setItem("kinetic_ai_assistant_settings", JSON.stringify({
+        assistantPreset,
+        customInstruction: customInstruction.slice(0, 3000),
+        autoFallback,
+        chainMode,
+        bridgeRole,
+        secondaryProviderId,
+      }));
+    } catch {
+      // Preferences remain active for this session if local storage is unavailable.
+    }
+  }, [assistantSettingsLoaded, assistantPreset, customInstruction, autoFallback, chainMode, bridgeRole, secondaryProviderId]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -393,6 +531,14 @@ export default function HomeClient() {
     const handleKeyDownGlobal = (e) => {
       if (e.key === "Escape") {
         setMobileMenuOpen(false);
+        const currentState = window.history.state || {};
+        if (currentState.kineticMobileMenu) {
+          window.history.replaceState(
+            { ...currentState, kineticMobileMenu: false, kineticTab: activeTab },
+            "",
+            window.location.href
+          );
+        }
         setShowSettingsPanel(false);
         setIsModalOpen(false);
         setIsAccountOpen(false);
@@ -403,12 +549,9 @@ export default function HomeClient() {
       }
     };
 
-    const handlePopState = () => {
-      if (mobileMenuOpen) {
-        setMobileMenuOpen(false);
-      } else if (activeTab !== "chat") {
-        setActiveTab("chat");
-      }
+    const handlePopState = (event) => {
+      setMobileMenuOpen(false);
+      setActiveTab(event.state?.kineticTab || event.state?.tab || "chat");
     };
 
     window.addEventListener("keydown", handleKeyDownGlobal);
@@ -428,10 +571,24 @@ export default function HomeClient() {
 
   const activeChat = chats.find((c) => c.id === activeChatId) || chats[0];
   const messages = activeChat?.messages || [];
+  const lastMessageLength = messages.at(-1)?.content?.length ?? 0;
+  const estimatedChatInputTokens = Math.ceil(
+    (messages.reduce((sum, message) => sum + String(message.content || "").length, 0) + input.length) / 4
+  );
+
+  const scrollConversationToBottom = (behavior = "smooth") => {
+    const container = chatScrollRef.current;
+    if (!container) return;
+    chatAtBottomRef.current = true;
+    container.scrollTo({ top: container.scrollHeight, behavior });
+    setShowScrollToBottom(false);
+  };
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages.length, isLoading]);
+    const container = chatScrollRef.current;
+    if (!container || !chatAtBottomRef.current) return;
+    container.scrollTo({ top: container.scrollHeight, behavior: "auto" });
+  }, [activeChatId, messages.length, lastMessageLength, isLoading]);
 
   if (authChecking) {
     return <AppBootSkeleton darkMode={darkMode} />;
@@ -485,7 +642,17 @@ export default function HomeClient() {
   }
 
   const activeProvider = providers.find((p) => p.id === activeProviderId);
-  const secondaryProvider = providers.find((p) => p.id === secondaryProviderId);
+  const activeProviderModels = activeProvider
+    ? [...new Set([
+        ...(Array.isArray(activeProvider.availableModels)
+          ? activeProvider.availableModels.filter((model) => typeof model === "string" && model.trim() && model.length <= 200).slice(0, 250)
+          : []),
+        ...(activeProvider.model ? [activeProvider.model] : []),
+      ])]
+    : [];
+  const reasoningSupport = getReasoningSupport(activeProvider);
+  const secondaryProviderOptions = providers.filter((provider) => provider.id !== activeProviderId);
+  const secondaryProvider = secondaryProviderOptions.find((p) => p.id === secondaryProviderId) || secondaryProviderOptions[0] || null;
   const effectiveSystemPrompt =
     customInstruction.trim() ||
     ASSISTANT_PRESETS[assistantPreset]?.prompt ||
@@ -493,18 +660,54 @@ export default function HomeClient() {
 
   const switchTab = (tab) => {
     triggerHaptic("light");
-    if (tab !== "chat") {
-      window.history.pushState({ tab }, "");
+    const currentState = window.history.state || {};
+    if (currentState.kineticMobileMenu) {
+      window.history.replaceState(
+        { ...currentState, kineticMobileMenu: false, kineticTab: activeTab },
+        "",
+        window.location.href
+      );
+    }
+    if (tab !== activeTab) {
+      window.history.pushState(
+        { ...(window.history.state || {}), kineticTab: tab },
+        "",
+        window.location.href
+      );
     }
     setActiveTab(tab);
     setMobileMenuOpen(false);
+  };
+
+  const openMobileMenu = () => {
+    if (mobileMenuOpen) return;
+    window.history.pushState(
+      { ...(window.history.state || {}), kineticTab: activeTab, kineticMobileMenu: true },
+      "",
+      window.location.href
+    );
+    setMobileMenuOpen(true);
+  };
+
+  const closeMobileMenu = () => {
+    setMobileMenuOpen(false);
+    const currentState = window.history.state || {};
+    if (currentState.kineticMobileMenu) {
+      window.history.replaceState(
+        { ...currentState, kineticMobileMenu: false, kineticTab: activeTab },
+        "",
+        window.location.href
+      );
+    }
   };
 
   const handleNotificationRequest = async () => {
     triggerHaptic("light");
     if (typeof Notification === "undefined") return;
     if (Notification.permission === "granted") {
-      setNotificationsEnabled(!notificationsEnabled);
+      const nextValue = !notificationsEnabled;
+      setNotificationsEnabled(nextValue);
+      localStorage.setItem("kinetic_ai_notifications", nextValue ? "on" : "off");
       return;
     }
     setIsPermissionOpen(true);
@@ -516,7 +719,11 @@ export default function HomeClient() {
       const perm = await Notification.requestPermission();
       if (perm === "granted") {
         setNotificationsEnabled(true);
+        localStorage.setItem("kinetic_ai_notifications", "on");
         triggerHaptic("success");
+      } else {
+        setNotificationsEnabled(false);
+        localStorage.setItem("kinetic_ai_notifications", "off");
       }
     } catch {
       // ignore
@@ -528,6 +735,7 @@ export default function HomeClient() {
     messages: msgHistory,
     systemPrompt,
     signal,
+    useWebSearchOverride = webSearch,
   }) => {
     const targetProvider = providerOverride || activeProvider;
     if (!targetProvider) {
@@ -551,7 +759,8 @@ export default function HomeClient() {
         fallbackProviders,
         messages: msgHistory,
         systemPrompt,
-        useWebSearch: webSearch,
+        useWebSearch: useWebSearchOverride,
+        reasoningLevel,
       }),
     });
 
@@ -570,7 +779,7 @@ export default function HomeClient() {
         );
       }
       if (data.code === "TEMP_BAN" && data.banUntil) {
-        setClockNow(Date.now());
+        setClockNow(getCurrentTimestamp());
         setBanUntil(data.banUntil);
         localStorage.setItem(`kinetic_ban_${firebaseUser.uid}`, String(data.banUntil));
       }
@@ -581,14 +790,17 @@ export default function HomeClient() {
       setUserProfile((prev) => (prev ? { ...prev, dailyCount: Math.max(prev.dailyCount || 0, data.newDailyCount) } : prev));
     }
 
+    if (data.dailyTokenUsage) {
+      setUserProfile((prev) => applyTokenUsage(prev, data.dailyTokenUsage, data.modelTokenUsage));
+    }
+
     return data;
   };
 
   const handleNewChat = () => {
     if (isLoading) return;
     triggerHaptic("light");
-    setActiveTab("chat");
-    setSidebarListTab("chats");
+    switchTab("chat");
     setMobileMenuOpen(false);
     if (activeChat && activeChat.messages.length === 0) {
       setErrorMsg("");
@@ -596,6 +808,8 @@ export default function HomeClient() {
     }
     const newChat = createEmptyChat();
     setChats((prev) => [newChat, ...prev]);
+    chatAtBottomRef.current = true;
+    setShowScrollToBottom(false);
     setActiveChatId(newChat.id);
     setErrorMsg("");
   };
@@ -615,10 +829,16 @@ export default function HomeClient() {
         if (filtered.length === 0) {
           const fresh = createEmptyChat();
           setChats([fresh]);
+          chatAtBottomRef.current = true;
+          setShowScrollToBottom(false);
           setActiveChatId(fresh.id);
         } else {
           setChats(filtered);
-          if (activeChatId === id) setActiveChatId(filtered[0].id);
+          if (activeChatId === id) {
+            chatAtBottomRef.current = true;
+            setShowScrollToBottom(false);
+            setActiveChatId(filtered[0].id);
+          }
         }
         setConfirmState({ open: false });
         triggerHaptic("success");
@@ -655,6 +875,7 @@ export default function HomeClient() {
         if (activeProviderId === id) setActiveProviderId(updated[0]?.id || "");
         if (secondaryProviderId === id) setSecondaryProviderId(updated[0]?.id || "");
         setConfirmState({ open: false });
+        if (updated.length === 0) setIsConnectionManagerOpen(false);
         triggerHaptic("success");
       },
     });
@@ -673,6 +894,59 @@ export default function HomeClient() {
         setConfirmState({ open: false });
         signOut(auth);
       },
+    });
+  };
+
+  const performMonthlyQuotaReset = async () => {
+    setConfirmState({ open: false });
+    setQuotaResetError("");
+    setQuotaResetLoading(true);
+    try {
+      const idToken = await firebaseUser.getIdToken();
+      const response = await fetch("/api/account/quota-reset", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+        cache: "no-store",
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        if (result.code === "ALREADY_USED") {
+          setUserProfile((previous) => previous
+            ? { ...previous, monthlyQuotaResetMonth: monthlyQuotaReset.month }
+            : previous);
+        }
+        throw new Error(result.error || t.monthlyResetUnavailable);
+      }
+
+      setUserProfile((previous) => previous
+        ? {
+            ...previous,
+            dailyCount: 0,
+            lastResetDate: getTodayKey(),
+            monthlyQuotaResetMonth: result.monthlyQuotaResetMonth,
+          }
+        : previous);
+      setErrorMsg("");
+      setErrorCode("");
+      triggerHaptic("success");
+    } catch (error) {
+      setQuotaResetError(formatFriendlyError(error.message, lang));
+    } finally {
+      setQuotaResetLoading(false);
+    }
+  };
+
+  const requestMonthlyQuotaReset = () => {
+    if (!monthlyQuotaReset.available || quotaResetLoading || !firebaseUser) return;
+    setQuotaResetError("");
+    setConfirmState({
+      open: true,
+      title: t.monthlyResetTitle,
+      description: t.monthlyResetDescription,
+      confirmText: t.monthlyResetConfirm,
+      cancelText: t.cancel,
+      danger: false,
+      onConfirm: performMonthlyQuotaReset,
     });
   };
 
@@ -771,12 +1045,85 @@ export default function HomeClient() {
     e.target.value = "";
   };
 
+  const normalizeProviderUrl = (value) => {
+    const trimmed = String(value || "").trim().replace(/\/+$/, "");
+    try {
+      const url = new URL(trimmed);
+      url.hash = "";
+      url.searchParams.sort();
+      return `${url.origin.toLowerCase()}${url.pathname.replace(/\/+$/, "")}${url.search}`;
+    } catch {
+      return trimmed.toLowerCase();
+    }
+  };
+
   const handleAddProvider = (newProvider) => {
+    const duplicate = providers.find((provider) =>
+      provider.type === newProvider.type &&
+      normalizeProviderUrl(provider.baseUrl) === normalizeProviderUrl(newProvider.baseUrl) &&
+      String(provider.apiKey || "") === String(newProvider.apiKey || "")
+    );
+    if (duplicate) {
+      setActiveProviderId(duplicate.id);
+      return {
+        duplicate: true,
+        message: lang === "en"
+          ? "This API connection already exists and has been selected. Close this dialog to use it, then change models from the composer."
+          : "Bu API bağlantısı zaten kayıtlı ve seçildi. Bu pencereyi kapatıp kullanabilir, modeli sohbet alanından değiştirebilirsin.",
+      };
+    }
+
     triggerHaptic("success");
     const updated = [...providers, newProvider];
     setProviders(updated);
     setActiveProviderId(newProvider.id);
     if (!secondaryProviderId) setSecondaryProviderId(newProvider.id);
+    return { duplicate: false };
+  };
+
+  const updateProviderModel = (providerId, model) => {
+    if (typeof model !== "string" || !model.trim() || model.length > 200 || /[\u0000-\u001f\u007f]/.test(model)) return;
+    setProviders((previous) => previous.map((provider) =>
+      provider.id === providerId ? { ...provider, model: model.trim() } : provider
+    ));
+  };
+
+  const refreshProviderModels = async (providerId) => {
+    const provider = providers.find((item) => item.id === providerId);
+    if (!provider || refreshingProviderId) return;
+    setRefreshingProviderId(providerId);
+    setConnectionNotice("");
+    setConnectionNoticeIsError(false);
+    try {
+      const response = await fetch("/api/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ provider }),
+      });
+      const text = await response.text();
+      let data = null;
+      try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+      if (!response.ok) throw new Error(data?.error || (lang === "en" ? `Model list request failed (HTTP ${response.status}).` : `Model listesi alınamadı (HTTP ${response.status}).`));
+      const availableModels = Array.isArray(data?.models)
+        ? [...new Set(data.models.filter((model) => typeof model === "string" && model.trim() && model.length <= 200 && !/[\u0000-\u001f\u007f]/.test(model)))].slice(0, 250)
+        : [];
+      setProviders((previous) => previous.map((item) => item.id === providerId
+        ? {
+            ...item,
+            availableModels,
+            model: availableModels.includes(item.model) || availableModels.length === 0 ? item.model : availableModels[0],
+          }
+        : item
+      ));
+      setConnectionNotice(availableModels.length
+        ? (lang === "en" ? `${availableModels.length} models are ready. Choose one from the composer.` : `${availableModels.length} model hazır. Sohbet alanından seçebilirsin.`)
+        : (lang === "en" ? "This endpoint did not return a model catalog. You can set its model ID below." : "Bu endpoint model kataloğu döndürmedi. Model kimliğini aşağıdan girebilirsin."));
+    } catch (error) {
+      setConnectionNotice(error.message || (lang === "en" ? "Could not refresh models." : "Modeller yenilenemedi."));
+      setConnectionNoticeIsError(true);
+    } finally {
+      setRefreshingProviderId("");
+    }
   };
 
   const handleStopGenerating = () => {
@@ -800,6 +1147,7 @@ export default function HomeClient() {
 
   const generateResponse = async (historyToUse, targetChatId) => {
     if (!activeProvider) {
+      setErrorCode("");
       setErrorMsg(t.noModelsDesc);
       return;
     }
@@ -807,6 +1155,7 @@ export default function HomeClient() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setErrorMsg("");
+    setErrorCode("");
     setIsSlowWait(false);
     setIsLoading(true);
 
@@ -853,26 +1202,34 @@ export default function HomeClient() {
           messages: cleanHistory,
           systemPrompt: effectiveSystemPrompt,
           useWebSearch: webSearch,
+          reasoningLevel,
           stream: true,
         }),
       });
 
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `Sunucu hatası (HTTP ${res.status})`);
+        const requestError = new Error(data.error || `Sunucu hatası (HTTP ${res.status})`);
+        requestError.code = data.code || "";
+        throw requestError;
       }
 
       let streamError = null;
+      let streamedReplyText = "";
 
       await readSSE(res, {
         chunk: ({ text }) => {
+          streamedReplyText += text;
           updateStreamingMessage((msg) => ({ ...msg, content: msg.content + text }));
         },
-        done: ({ usedProvider, usedModel, isFallback, newDailyCount, webSources = [] }) => {
+        done: ({ usedProvider, usedModel, isFallback, newDailyCount, dailyTokenUsage, modelTokenUsage, webSources = [] }) => {
           const label = isFallback ? `Yedek AI · ${usedProvider} (${usedModel})` : `${usedProvider} · ${usedModel}`;
           updateStreamingMessage((msg) => ({ ...msg, providerName: label, sources: webSources, streaming: false }));
           if (typeof newDailyCount === "number") {
             setUserProfile((prev) => (prev ? { ...prev, dailyCount: Math.max(prev.dailyCount || 0, newDailyCount) } : prev));
+          }
+          if (dailyTokenUsage) {
+            setUserProfile((prev) => applyTokenUsage(prev, dailyTokenUsage, modelTokenUsage));
           }
         },
         error: ({ message }) => {
@@ -907,15 +1264,7 @@ export default function HomeClient() {
 
       // AI Köprüsü (2. aşama) hâlâ non-stream şekilde çalışıyor.
       if (chainMode && secondaryProvider) {
-        const firstReplyText = (() => {
-          let latest = "";
-          setChats((prev) => {
-            const c = prev.find((x) => x.id === targetChatId);
-            latest = c?.messages?.[placeholderIndex]?.content || "";
-            return prev;
-          });
-          return latest;
-        })();
+        const firstReplyText = streamedReplyText;
 
         const lastUserText =
           [...historyToUse].reverse().find((m) => m.role === "user")?.content || "";
@@ -950,6 +1299,7 @@ export default function HomeClient() {
         streaming: false,
         content: msg.content || "",
       }));
+      setErrorCode(err.code || "");
       setErrorMsg(formatFriendlyError(err.message, lang));
     } finally {
       abortControllerRef.current = null;
@@ -966,6 +1316,8 @@ export default function HomeClient() {
     }
 
     triggerHaptic("light");
+    chatAtBottomRef.current = true;
+    setShowScrollToBottom(false);
 
     const textFiles = attachments.filter((a) => a.kind === "text");
     const imageFiles = attachments.filter((a) => a.kind === "image");
@@ -1052,15 +1404,35 @@ export default function HomeClient() {
     }
     const recognition = new SpeechRecognition();
     speechRecognitionRef.current = recognition;
+    voiceSegmentsRef.current = [];
+    voiceBaseInputRef.current = input;
     recognition.lang = lang === "en" ? "en-US" : "tr-TR";
     recognition.interimResults = false;
     recognition.continuous = false;
     recognition.onresult = (event) => {
-      const transcript = Array.from(event.results).map((result) => result[0]?.transcript || "").join(" ").trim();
-      if (transcript) setInput((current) => current ? `${current} ${transcript}` : transcript);
+      for (let index = event.resultIndex; index < event.results.length; index += 1) {
+        const segment = event.results[index]?.[0]?.transcript?.trim();
+        if (segment) voiceSegmentsRef.current[index] = segment;
+      }
+      const transcript = voiceSegmentsRef.current
+        .filter(Boolean)
+        .filter((segment, index, all) => index === 0 || segment.toLocaleLowerCase(lang === "en" ? "en-US" : "tr-TR") !== all[index - 1].toLocaleLowerCase(lang === "en" ? "en-US" : "tr-TR"))
+        .join(" ")
+        .trim();
+      if (transcript) {
+        const base = voiceBaseInputRef.current.trim();
+        setInput(base ? `${base} ${transcript}` : transcript);
+      }
     };
-    recognition.onerror = () => setErrorMsg(lang === "en" ? "Could not access voice input. Check microphone permission." : "Ses tanınamadı. Mikrofon iznini kontrol edin.");
-    recognition.onend = () => setIsListening(false);
+    recognition.onerror = (event) => {
+      if (event.error !== "aborted" && event.error !== "no-speech") {
+        setErrorMsg(lang === "en" ? "Could not access voice input. Check microphone permission." : "Ses tanınamadı. Mikrofon iznini kontrol edin.");
+      }
+    };
+    recognition.onend = () => {
+      setIsListening(false);
+      if (speechRecognitionRef.current === recognition) speechRecognitionRef.current = null;
+    };
     setErrorMsg("");
     setIsListening(true);
     try {
@@ -1081,59 +1453,39 @@ export default function HomeClient() {
       {/* MOBİL OVERLAY */}
       {mobileMenuOpen && (
         <div
-          onClick={() => setMobileMenuOpen(false)}
+          onClick={closeMobileMenu}
           className="fixed inset-0 z-30 bg-black/60 backdrop-blur-xs md:hidden"
         />
       )}
 
       {/* SOL KENAR ÇUBUĞU */}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-76 flex-col border-r p-4 transition-transform duration-200 safe-top safe-bottom md:static md:w-72 md:translate-x-0 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-40 flex w-full min-h-0 flex-col overflow-x-hidden overflow-y-auto overscroll-contain border-r p-4 pt-[calc(env(safe-area-inset-top)+1rem)] pb-[calc(env(safe-area-inset-bottom)+0.75rem)] transition-transform duration-200 md:static md:h-dvh md:w-72 md:translate-x-0 md:overflow-hidden md:pt-6 ${mobileMenuOpen ? "translate-x-0" : "-translate-x-full"
           } ${darkMode ? "border-zinc-800/80 bg-zinc-900" : "border-zinc-200 bg-white"}`}
       >
         {/* Marka & Üst Kontroller */}
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-3 mt-1 flex min-h-10 items-center justify-between gap-2 md:mb-4 md:mt-1">
           <div className="flex items-center gap-2.5">
             <KineticLogo size={32} darkMode={darkMode} />
             <div>
-              <h1 className="text-sm font-bold tracking-tight">KineticAI</h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-sm font-bold tracking-tight">KineticAI</h1>
+                <BetaBadge darkMode={darkMode} />
+              </div>
               <p className="text-[10px] opacity-50">{t.subtitle}</p>
             </div>
           </div>
 
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => {
-                triggerHaptic("light");
-                setLang(lang === "tr" ? "en" : "tr");
-              }}
-              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg text-[11px] font-semibold opacity-70 transition hover:bg-zinc-800/30 hover:opacity-100"
-              title="Dil / Language"
-            >
-              <Globe className="mr-0.5 h-3.5 w-3.5" />
-              {lang.toUpperCase()}
-            </button>
-            <button
-              onClick={() => {
-                triggerHaptic("light");
-                setIsTutorOpen(true);
-              }}
-              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg opacity-70 transition hover:bg-zinc-800/30 hover:opacity-100"
-              title="Öğretici"
-            >
-              <HelpCircle className="h-4 w-4" />
-            </button>
-            <button
-              onClick={() => {
-                triggerHaptic("light");
-                setDarkMode(!darkMode);
-              }}
-              className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg opacity-70 transition hover:bg-zinc-800/30 hover:opacity-100"
-              title="Tema"
-            >
-              {darkMode ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-            </button>
-          </div>
+          <button
+            type="button"
+            onClick={closeMobileMenu}
+            className="touch-target flex shrink-0 items-center justify-center rounded-xl border border-zinc-700/40 opacity-75 transition hover:bg-zinc-800/40 hover:opacity-100 md:hidden"
+            aria-label={t.closeMenu}
+            title={t.closeMenu}
+          >
+            <X className="h-5 w-5" />
+          </button>
+
         </div>
 
         {/* Mod Sekmeleri */}
@@ -1143,7 +1495,7 @@ export default function HomeClient() {
         >
           <button
             onClick={() => switchTab("chat")}
-            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${activeTab === "chat"
+            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition ${activeTab === "chat"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-white text-zinc-900 shadow-sm"
@@ -1155,7 +1507,7 @@ export default function HomeClient() {
           </button>
           <button
             onClick={() => switchTab("notebook")}
-            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${activeTab === "notebook"
+            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition ${activeTab === "notebook"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-white text-zinc-900 shadow-sm"
@@ -1167,7 +1519,7 @@ export default function HomeClient() {
           </button>
           <button
             onClick={() => switchTab("tasks")}
-            className={`flex min-h-[40px] items-center justify-center gap-1 rounded-lg transition ${activeTab === "tasks"
+            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition ${activeTab === "tasks"
                 ? darkMode
                   ? "bg-zinc-800 text-white"
                   : "bg-white text-zinc-900 shadow-sm"
@@ -1183,7 +1535,7 @@ export default function HomeClient() {
         <div className="mb-3 grid grid-cols-2 gap-2">
           <button
             onClick={handleNewChat}
-            className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${darkMode
+            className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${darkMode
                 ? "border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800"
                 : "border-zinc-300 bg-zinc-50 hover:bg-zinc-100"
               }`}
@@ -1196,7 +1548,7 @@ export default function HomeClient() {
               triggerHaptic("light");
               setIsModalOpen(true);
             }}
-            className={`flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${darkMode
+            className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${darkMode
                 ? "bg-white text-zinc-950 hover:bg-zinc-200"
                 : "bg-zinc-900 text-white hover:bg-zinc-800"
               }`}
@@ -1208,13 +1560,15 @@ export default function HomeClient() {
 
         {/* AKTİF MODEL SEÇİCİ */}
         <div className="mb-3">
-          <label className="mb-1 block px-1 text-[10px] font-semibold uppercase tracking-wider opacity-45">
-            Aktif Yapay Zeka
-          </label>
+          <div className="mb-1 flex min-h-9 items-center px-1">
+            <label className="block px-1 text-[10px] font-semibold uppercase tracking-wider opacity-45">
+              {t.activeAI}
+            </label>
+          </div>
           {providers.length === 0 ? (
             <button
               onClick={() => setIsModalOpen(true)}
-              className="flex min-h-[42px] w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20"
+              className="flex min-h-12 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20"
             >
               <Plus className="h-3.5 w-3.5" />
               {t.noModelsCta}
@@ -1236,65 +1590,35 @@ export default function HomeClient() {
           )}
         </div>
 
-        {/* FERAH LİSTE SEKMESİ (Sohbetler | Modeller) */}
-        <div className="mb-2 flex gap-1 border-b border-zinc-800/50 pb-2 text-[11px] font-medium">
-          <button
-            onClick={() => setSidebarListTab("chats")}
-            className={`flex-1 rounded-lg py-1.5 transition ${sidebarListTab === "chats"
-                ? darkMode
-                  ? "bg-zinc-800 text-white"
-                  : "bg-zinc-200 text-zinc-900"
-                : "opacity-55 hover:opacity-100"
-              }`}
-          >
-            {t.chatHistory} ({chats.length})
-          </button>
-          <button
-            onClick={() => setSidebarListTab("models")}
-            className={`flex-1 rounded-lg py-1.5 transition ${sidebarListTab === "models"
-                ? darkMode
-                  ? "bg-zinc-800 text-white"
-                  : "bg-zinc-200 text-zinc-900"
-                : "opacity-55 hover:opacity-100"
-              }`}
-          >
-            Modeller ({providers.length})
-          </button>
+        {/* Sohbet geçmişi */}
+        <div className={`mb-2 flex min-h-10 items-center justify-between border-b px-2 pb-2 text-[11px] font-medium ${darkMode ? "border-zinc-800/50" : "border-zinc-200"}`}>
+          <span>{t.chatHistory}</span>
+          <span className="rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] opacity-60">{chats.length}</span>
         </div>
 
-        {sidebarListTab === "chats" && chats.length > 0 && (
-          <label className={`mb-2 flex min-h-[38px] items-center gap-2 rounded-lg border px-2.5 ${darkMode ? "border-zinc-800 bg-zinc-950/50" : "border-zinc-300 bg-zinc-50"}`}>
+        {chats.length > 0 && (
+          <label className={`mb-2 flex min-h-12 items-center gap-2 rounded-lg border px-2.5 ${darkMode ? "border-zinc-800 bg-zinc-950/50" : "border-zinc-300 bg-zinc-50"}`}>
             <Search className="h-3.5 w-3.5 shrink-0 opacity-45" />
             <input
               value={chatSearch}
               onChange={(event) => setChatSearch(event.target.value)}
-              placeholder={lang === "en" ? "Search chats" : "Sohbetlerde ara"}
-              aria-label={lang === "en" ? "Search conversations" : "Sohbetlerde ara"}
+              placeholder={t.searchChats}
+              aria-label={t.searchChats}
               className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:opacity-45"
             />
-            {chatSearch && <button type="button" onClick={() => setChatSearch("")} aria-label={lang === "en" ? "Clear search" : "Aramayı temizle"} className="text-xs opacity-50 hover:opacity-100">×</button>}
+            {chatSearch && <button type="button" onClick={() => setChatSearch("")} aria-label={t.clearSearch} className="touch-target flex items-center justify-center text-xs opacity-60 hover:opacity-100">×</button>}
           </label>
         )}
 
         {/* TAM BOY FERAH LİSTE ALANI */}
-        <div className="mb-3 flex-1 divide-y divide-zinc-800/30 overflow-y-auto pr-1">
-          {sidebarListTab === "chats" ? (
-            <>
+        <div className="mb-3 min-h-0 flex-1 divide-y divide-zinc-800/30 overflow-y-auto overscroll-contain pr-1">
+          <>
             {filteredChats.map((chat) => {
               const isCurrent = chat.id === activeChat?.id && activeTab === "chat";
               return (
                 <div
                   key={chat.id}
-                  onClick={() => {
-                    if (!isLoading) {
-                      triggerHaptic("light");
-                      setActiveTab("chat");
-                      setActiveChatId(chat.id);
-                      setErrorMsg("");
-                      setMobileMenuOpen(false);
-                    }
-                  }}
-                  className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2.5 text-xs transition ${isCurrent
+                  className={`group flex min-h-16 items-center justify-between gap-1 rounded-lg px-1.5 py-1 text-xs transition ${isCurrent
                       ? darkMode
                         ? "bg-zinc-800/80 text-white"
                         : "bg-zinc-200/80 text-zinc-900 font-medium"
@@ -1307,7 +1631,6 @@ export default function HomeClient() {
                         autoFocus
                         value={editingChatTitle}
                         maxLength={80}
-                        onClick={(event) => event.stopPropagation()}
                         onChange={(event) => setEditingChatTitle(event.target.value)}
                         onKeyDown={(event) => {
                           event.stopPropagation();
@@ -1315,19 +1638,36 @@ export default function HomeClient() {
                           if (event.key === "Escape") setEditingChatId("");
                         }}
                         onBlur={() => setEditingChatId("")}
-                        className="w-full rounded bg-transparent text-xs outline-none ring-1 ring-emerald-500/50"
+                        className="min-h-12 w-full rounded bg-transparent text-xs outline-none ring-1 ring-emerald-500/50"
                         aria-label={lang === "en" ? "Conversation title" : "Sohbet başlığı"}
                       />
-                    ) : <div className="truncate">{chat.title}</div>}
-                    <div className="mt-0.5 text-[10px] opacity-45">
-                      {formatRelativeTime(chat.updatedAt, lang)}
-                    </div>
+                    ) : (
+                      <button
+                        type="button"
+                        disabled={isLoading}
+                        onClick={() => {
+                          triggerHaptic("light");
+                          switchTab("chat");
+                          chatAtBottomRef.current = true;
+                          setShowScrollToBottom(false);
+                          setActiveChatId(chat.id);
+                          setErrorMsg("");
+                        }}
+                        className="min-h-12 w-full text-left disabled:cursor-not-allowed"
+                        aria-current={isCurrent ? "page" : undefined}
+                      >
+                        <span className="block truncate">{chat.title}</span>
+                        <span className="mt-0.5 block text-[10px] opacity-55">
+                          {formatRelativeTime(chat.updatedAt, lang)}
+                        </span>
+                      </button>
+                    )}
                   </div>
                   {editingChatId !== chat.id && (
                     <button
                       type="button"
                       onClick={(event) => beginRenameChat(event, chat)}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-30 transition hover:bg-emerald-500/10 hover:text-emerald-500 group-hover:opacity-100"
+                      className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-55 transition hover:bg-emerald-500/10 hover:text-emerald-500 group-hover:opacity-100"
                       aria-label={lang === "en" ? `Rename ${chat.title}` : `${chat.title} sohbetini yeniden adlandır`}
                       title={lang === "en" ? "Rename chat" : "Sohbeti yeniden adlandır"}
                     >
@@ -1339,8 +1679,8 @@ export default function HomeClient() {
                       e.stopPropagation();
                       requestDeleteChat(chat.id);
                     }}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-30 transition hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
-                    aria-label="Sohbeti Sil"
+                    className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-55 transition hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
+                    aria-label={`${t.deleteChat}: ${chat.title}`}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
@@ -1348,105 +1688,89 @@ export default function HomeClient() {
               );
             })}
             {normalizedChatSearch && filteredChats.length === 0 && (
-              <p className="mt-3 rounded-lg px-2 py-4 text-center text-xs opacity-50">{lang === "en" ? "No matching chats." : "Eşleşen sohbet bulunamadı."}</p>
+              <div className="mt-3 rounded-xl border border-dashed border-zinc-700/50 px-3 py-5 text-center">
+                <Search className="mx-auto mb-2 h-5 w-5 opacity-45" aria-hidden="true" />
+                <p className="text-xs opacity-65">{t.noMatchingChats}</p>
+                <button type="button" onClick={() => setChatSearch("")} className="mt-2 inline-flex min-h-12 items-center rounded-lg px-3 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10">
+                  {t.showAllChats}
+                </button>
+              </div>
             )}
             </>
-          ) : providers.length === 0 ? (
-            <div className="mt-3 rounded-xl border border-dashed border-zinc-700/50 p-4 text-center text-xs opacity-60">
-              {t.noModelsDesc}
+          {chats.length === 0 && (
+            <div className="rounded-xl border border-dashed border-zinc-700/50 p-4 text-center">
+              <MessageSquare className="mx-auto mb-2 h-5 w-5 opacity-50" aria-hidden="true" />
+              <p className="text-xs opacity-65">{lang === "en" ? "Your chats will appear here." : "Sohbetlerin burada görünecek."}</p>
+              <button type="button" onClick={handleNewChat} className="mt-2 inline-flex min-h-10 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-emerald-400 hover:bg-emerald-500/10">
+                <Plus className="h-3.5 w-3.5" />{t.newChat}
+              </button>
             </div>
-          ) : (
-            providers.map((p) => {
-              const isSelected = p.id === activeProviderId;
-              return (
-                <div
-                  key={p.id}
-                  onClick={() => {
-                    triggerHaptic("light");
-                    setActiveProviderId(p.id);
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`group flex cursor-pointer items-center justify-between gap-2 rounded-lg px-2.5 py-2.5 text-xs transition ${isSelected
-                      ? darkMode
-                        ? "bg-emerald-500/10 text-emerald-300"
-                        : "bg-zinc-200 text-zinc-900 font-medium"
-                      : "opacity-75 hover:bg-zinc-800/30 hover:opacity-100"
-                    }`}
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{p.name}</p>
-                    <p className="mt-0.5 truncate text-[10px] opacity-55">{p.model}</p>
-                  </div>
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      requestDeleteProvider(p.id);
-                    }}
-                    className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-30 transition hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
-                    aria-label="Modeli Kaldır"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              );
-            })
           )}
         </div>
 
         {/* HESAP, KOTA & REKLAM KARTI */}
-        <div className="space-y-2">
+        <div className="relative shrink-0 space-y-2" ref={accountMenuRef}>
           {/* Kullanıcı Profili & Çıkış */}
-          <div
-            className={`flex items-center justify-between gap-1 rounded-xl border p-2.5 ${darkMode ? "border-zinc-800 bg-zinc-950/70" : "border-zinc-200 bg-zinc-50"
-              }`}
+          {accountMenuOpen && (
+            <div
+              role="menu"
+              aria-label={lang === "en" ? "Account menu" : "Hesap menüsü"}
+              className={`absolute inset-x-0 bottom-[calc(100%+0.5rem)] z-50 max-h-[min(70dvh,32rem)] overflow-y-auto rounded-2xl border p-2 shadow-2xl ${darkMode ? "border-zinc-700 bg-zinc-900 text-zinc-100" : "border-zinc-300 bg-white text-zinc-900"}`}
+            >
+              <div className={`mb-1 rounded-xl px-3 py-3 ${darkMode ? "bg-zinc-950/70" : "bg-zinc-100"}`}>
+                <p className="truncate text-xs font-semibold">{userProfile.name}</p>
+                <p className="mt-0.5 truncate text-[11px] opacity-55">{userProfile.email}</p>
+              </div>
+              <button role="menuitem" onClick={() => { setAccountMenuOpen(false); setIsAccountOpen(true); closeMobileMenu(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
+                <ShieldCheck className="h-4 w-4 opacity-70" />{lang === "en" ? "Account & security" : "Hesap ve güvenlik"}
+              </button>
+              <button role="menuitem" onClick={() => { setAccountMenuOpen(false); switchTab("settings"); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
+                <Settings className="h-4 w-4 opacity-70" />{lang === "en" ? "Settings" : "Ayarlar"}
+              </button>
+              <button role="menuitem" onClick={() => { setDarkMode((value) => !value); setAccountMenuOpen(false); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
+                {darkMode ? <Sun className="h-4 w-4 opacity-70" /> : <Moon className="h-4 w-4 opacity-70" />}{lang === "en" ? "Change theme" : "Temayı değiştir"}
+              </button>
+              <button role="menuitem" onClick={() => { setLang((value) => value === "tr" ? "en" : "tr"); setAccountMenuOpen(false); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
+                <Globe className="h-4 w-4 opacity-70" />{lang === "en" ? "Language · English" : "Dil · Türkçe"}
+              </button>
+              <button role="menuitem" onClick={() => { setIsTutorOpen(true); setAccountMenuOpen(false); closeMobileMenu(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
+                <HelpCircle className="h-4 w-4 opacity-70" />{lang === "en" ? "Help and guide" : "Yardım ve rehber"}
+              </button>
+              <div className={`my-1 border-t ${darkMode ? "border-zinc-700" : "border-zinc-200"}`} />
+              <button role="menuitem" onClick={() => { setAccountMenuOpen(false); requestLogout(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-red-400 transition hover:bg-red-500/10">
+                <LogOut className="h-4 w-4" />{lang === "en" ? "Sign out" : "Oturumu kapat"}
+              </button>
+            </div>
+          )}
+          <button
+            type="button"
+            aria-haspopup="menu"
+            aria-expanded={accountMenuOpen}
+            onClick={() => setAccountMenuOpen((open) => !open)}
+            className={`flex min-h-14 w-full items-center gap-3 rounded-xl border p-2.5 text-left transition hover:border-emerald-500/30 ${darkMode ? "border-zinc-800 bg-zinc-950/70" : "border-zinc-200 bg-zinc-50"}`}
           >
-            <button
-              onClick={() => setIsAccountOpen(true)}
-              className="min-h-[36px] min-w-0 flex-1 text-left transition hover:opacity-80"
-            >
-              <p className="truncate text-xs font-semibold">{userProfile.name}</p>
-              <p className="truncate text-[10px] opacity-55">{userProfile.email}</p>
-            </button>
-            <button
-              onClick={() => setIsAccountOpen(true)}
-              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg opacity-75 transition hover:bg-zinc-800/30 hover:opacity-100"
-              title={t.security}
-            >
-              <ShieldCheck className="h-4 w-4 text-emerald-400" />
-            </button>
-            <button
-              onClick={requestLogout}
-              className="flex min-h-[36px] min-w-[36px] items-center justify-center rounded-lg opacity-70 transition hover:bg-red-500/10 hover:text-red-400 hover:opacity-100"
-              title={t.confirmLogoutTitle}
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-
-          {/* İlerleme Çubuklu & Ödüllü Reklamlı Kota Kartı */}
-          <QuotaCard
-            dailyCount={userProfile.dailyCount}
-            dailyLimit={100}
-            onOpenAccount={() => setIsAccountOpen(true)}
-            darkMode={darkMode}
-            lang={lang}
-          />
+            <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-full ${darkMode ? "bg-emerald-500/10 text-emerald-400" : "bg-emerald-500/10 text-emerald-700"}`}>
+              <UserRound className="h-4 w-4" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-xs font-semibold">{userProfile.name}</span>
+              <span className="mt-0.5 block truncate text-[10px] opacity-55">{userProfile.email}</span>
+            </span>
+            {accountMenuOpen ? <ChevronDown className="h-4 w-4 shrink-0 opacity-55" /> : <ChevronUp className="h-4 w-4 shrink-0 opacity-55" />}
+          </button>
 
           {/* Gizlilik & Kullanım Koşulları */}
           <button
-            onClick={() => {
-              setMobileMenuOpen(false);
-              setActiveTab("updates");
-            }}
-            className={`flex min-h-[34px] w-full items-center justify-center gap-1.5 rounded-lg text-[10px] font-medium transition ${activeTab === "updates" ? "bg-emerald-500/10 text-emerald-500" : `hover:bg-zinc-800/30 hover:underline ${darkMode ? "text-zinc-300" : "text-zinc-600"}`}`}
+            onClick={() => switchTab("updates")}
+            className={`flex min-h-12 w-full items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition ${activeTab === "updates" ? "bg-emerald-500/10 text-emerald-500" : `hover:bg-zinc-800/30 hover:underline ${darkMode ? "text-zinc-300" : "text-zinc-600"}`}`}
           >
             <Link2 className="h-3 w-3" />
-            Güncellemeler
+            {t.updates}
           </button>
 
           <button
             onClick={() => setIsLegalOpen(true)}
-            className="flex min-h-[32px] w-full items-center justify-center gap-1 text-[10px] opacity-50 hover:underline hover:opacity-90"
+            className="flex min-h-12 w-full items-center justify-center gap-1 text-xs opacity-60 hover:underline hover:opacity-90"
           >
             <Scale className="h-3 w-3" />
             {t.legal}
@@ -1465,23 +1789,25 @@ export default function HomeClient() {
             {activeTab !== "chat" ? (
               <button
                 onClick={() => switchTab("chat")}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl md:hidden"
-                aria-label="Geri"
+                className="touch-target flex items-center justify-center rounded-xl md:hidden"
+                aria-label={t.goBack}
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
             ) : (
               <button
-                onClick={() => setMobileMenuOpen(true)}
-                className="flex min-h-[44px] min-w-[44px] items-center justify-center rounded-xl md:hidden"
-                aria-label="Menü"
+                onClick={openMobileMenu}
+                className="touch-target flex items-center justify-center rounded-xl md:hidden"
+                aria-label={t.menu}
               >
                 <Menu className="h-5 w-5" />
               </button>
             )}
 
             {activeTab === "updates" ? (
-              <span className="font-semibold">KineticAI güncellemeleri</span>
+            <span className="font-semibold">{t.updates}</span>
+            ) : activeTab === "settings" ? (
+              <span className="font-semibold">{t.tabSettings}</span>
             ) : activeProvider ? (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-semibold">{activeProvider.name}</span>
@@ -1550,7 +1876,7 @@ export default function HomeClient() {
           {/* AÇILIR ASİSTAN & KÖPRÜ PANELİ */}
           {showSettingsPanel && activeTab === "chat" && (
             <div
-              className={`absolute right-4 top-14 z-30 w-80 space-y-3 rounded-2xl border p-4 shadow-2xl animate-scaleIn ${darkMode
+              className={`absolute right-2 top-[calc(100%+0.25rem)] z-30 max-h-[min(78dvh,42rem)] w-[min(24rem,calc(100vw-1rem))] space-y-3 overflow-y-auto overscroll-contain rounded-2xl border p-4 shadow-2xl animate-scaleIn ${darkMode
                   ? "border-zinc-800 bg-zinc-900 text-zinc-100"
                   : "border-zinc-200 bg-white text-zinc-900"
                 }`}
@@ -1607,6 +1933,11 @@ export default function HomeClient() {
                     className="h-4 w-4 accent-emerald-500"
                   />
                 </label>
+                <p className="-mt-1 text-[10px] leading-relaxed opacity-55">
+                  {lang === "en"
+                    ? "If a provider fails, KineticAI can retry with another connected provider."
+                    : "Bir sağlayıcı yanıt vermezse KineticAI bağlı başka bir sağlayıcıyla yeniden deneyebilir."}
+                </p>
 
                 <label className="flex min-h-[36px] cursor-pointer items-center justify-between">
                   <span className="flex items-center gap-1.5">
@@ -1620,14 +1951,27 @@ export default function HomeClient() {
                     className="h-4 w-4 accent-emerald-500"
                   />
                 </label>
+                <p className="-mt-1 text-[10px] leading-relaxed opacity-55">
+                  {lang === "en"
+                    ? "The second AI reviews the first answer. It makes another provider request and may use more tokens, quota and time."
+                    : "İkinci yapay zekâ ilk yanıtı inceler. Ayrı bir sağlayıcı isteği gönderir; ek token, kota ve süre kullanabilir."}
+                </p>
 
-                {chainMode && providers.length > 0 && (
+                {chainMode && secondaryProviderOptions.length === 0 && (
+                  <p className="rounded-lg border border-amber-500/25 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-300">
+                    {lang === "en"
+                      ? "The bridge needs a second, different API connection. Add another provider to enable its review step."
+                      : "Köprü için farklı bir ikinci API bağlantısı gerekir. İnceleme adımını kullanmak için başka bir sağlayıcı ekle."}
+                  </p>
+                )}
+
+                {chainMode && secondaryProviderOptions.length > 0 && (
                   <div className="space-y-2 pt-1">
                     <CustomSelect
-                      value={secondaryProviderId}
+                      value={secondaryProvider?.id || ""}
                       onChange={(val) => setSecondaryProviderId(val)}
                       darkMode={darkMode}
-                      options={providers.map((p) => ({
+                      options={secondaryProviderOptions.map((p) => ({
                         value: p.id,
                         label: `2. AI: ${p.name}`,
                         sublabel: p.model,
@@ -1657,6 +2001,8 @@ export default function HomeClient() {
               activeProvider={activeProvider}
               onAskAI={runAIRequest}
               darkMode={darkMode}
+              lang={lang}
+              reasoningLevel={reasoningLevel}
             />
           </div>
         )}
@@ -1667,8 +2013,39 @@ export default function HomeClient() {
               activeProvider={activeProvider}
               onAskAI={runAIRequest}
               darkMode={darkMode}
+              lang={lang}
+              reasoningLevel={reasoningLevel}
             />
           </div>
+        )}
+
+        {activeTab === "settings" && (
+          <SettingsStudio
+            lang={lang}
+            darkMode={darkMode}
+            setDarkMode={setDarkMode}
+            setLang={setLang}
+            notificationsEnabled={notificationsEnabled}
+            onRequestNotifications={handleNotificationRequest}
+            userProfile={userProfile}
+            onOpenAccount={() => setIsAccountOpen(true)}
+            onManageProviders={() => {
+              setConnectionNotice("");
+              setConnectionNoticeIsError(false);
+              setIsConnectionManagerOpen(true);
+            }}
+            quota={{
+              dailyCount: userProfile.dailyCount,
+              dailyLimit: 100,
+              tokenUsage: userProfile.dailyTokenUsage,
+              modelTokenUsage: userProfile.tokenUsageByModel,
+              onResetQuota: requestMonthlyQuotaReset,
+              monthlyResetAvailable: monthlyQuotaReset.available,
+              monthlyResetUsed: monthlyQuotaReset.used,
+              resetLoading: quotaResetLoading,
+              resetError: quotaResetError,
+            }}
+          />
         )}
 
         {activeTab === "updates" && (
@@ -1682,7 +2059,17 @@ export default function HomeClient() {
 
         {activeTab === "chat" && (
           <>
-            <div className="flex-1 overflow-y-auto px-4 py-6">
+            <div className="relative min-h-0 flex-1">
+            <div
+              ref={chatScrollRef}
+              onScroll={(event) => {
+                const container = event.currentTarget;
+                const atBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 96;
+                chatAtBottomRef.current = atBottom;
+                setShowScrollToBottom(!atBottom);
+              }}
+              className="h-full overflow-y-auto px-4 py-6"
+            >
               <div className="mx-auto max-w-3xl space-y-6">
                 {messages.length === 0 ? (
                   <ChatEmptyState
@@ -1814,19 +2201,40 @@ export default function HomeClient() {
                       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                       <span>{errorMsg}</span>
                     </div>
-                    {!isLoading && messages.length > 0 && (
+                    {!isLoading && messages.length > 0 && errorCode !== "LIMIT_REACHED" && (
                       <button
                         onClick={handleRegenerate}
-                        className="min-h-[36px] rounded-lg border border-red-500/40 px-3 font-medium hover:bg-red-500/20"
+                        className="min-h-12 rounded-lg border border-red-500/40 px-3 font-medium hover:bg-red-500/20"
                       >
                         {t.retry}
+                      </button>
+                    )}
+                    {errorCode === "LIMIT_REACHED" && monthlyQuotaReset.available && (
+                      <button
+                        type="button"
+                        onClick={requestMonthlyQuotaReset}
+                        disabled={quotaResetLoading}
+                        className="min-h-12 rounded-lg bg-emerald-500 px-3 font-semibold text-zinc-950 hover:bg-emerald-400 disabled:opacity-50"
+                      >
+                        {lang === "en" ? "Use monthly reset" : "Aylık sıfırlamayı kullan"}
                       </button>
                     )}
                   </div>
                 )}
 
-                <div ref={messagesEndRef} />
               </div>
+            </div>
+            {showScrollToBottom && (
+              <button
+                type="button"
+                onClick={() => scrollConversationToBottom("smooth")}
+                className={`absolute bottom-4 left-1/2 z-20 flex min-h-11 -translate-x-1/2 items-center gap-2 rounded-full border px-4 text-xs font-semibold shadow-lg transition hover:-translate-x-1/2 hover:-translate-y-0.5 ${darkMode ? "border-zinc-700 bg-zinc-800 text-zinc-100 hover:bg-zinc-700" : "border-zinc-300 bg-white text-zinc-900 hover:bg-zinc-100"}`}
+                aria-label={lang === "en" ? "Scroll to the latest message" : "En aşağıya in"}
+              >
+                <ArrowDown className="h-4 w-4" />
+                {lang === "en" ? "Latest message" : "En aşağıya in"}
+              </button>
+            )}
             </div>
 
             {/* Alt Mesaj Kutusu */}
@@ -1862,7 +2270,7 @@ export default function HomeClient() {
                 )}
 
                 <div
-                  className={`flex items-end gap-2 rounded-2xl border p-2 shadow-sm ${darkMode ? "border-zinc-800 bg-zinc-900/90" : "border-zinc-300 bg-white"
+                  className={`flex flex-col gap-1 rounded-2xl border p-2 shadow-sm ${darkMode ? "border-zinc-800 bg-zinc-900/90" : "border-zinc-300 bg-white"
                     }`}
                 >
                   <input
@@ -1873,6 +2281,48 @@ export default function HomeClient() {
                     onChange={handleFileSelect}
                     className="hidden"
                   />
+
+                  <div className="relative z-20 flex min-w-0 flex-wrap items-center gap-2 px-1 pb-1">
+                    <label className="flex shrink-0 items-center gap-1.5 text-[10px] opacity-75">
+                      <span>{lang === "en" ? "Model" : "Model"}</span>
+                      {activeProvider ? (
+                        <span className="block min-w-[180px] max-w-[46vw] sm:max-w-[280px]">
+                          <CustomSelect
+                            value={activeProvider.model || ""}
+                            onChange={(value) => { triggerHaptic("light"); updateProviderModel(activeProvider.id, value); }}
+                            darkMode={darkMode}
+                            options={activeProviderModels.map((model) => ({ value: model, label: model }))}
+                            placeholder={lang === "en" ? "Choose a model" : "Model seç"}
+                            placement="top"
+                          />
+                        </span>
+                      ) : (
+                        <span className={`rounded-lg border px-2.5 py-2 text-[11px] ${darkMode ? "border-zinc-700 bg-zinc-950" : "border-zinc-300 bg-white"}`}>
+                          {lang === "en" ? "Connect an API" : "API bağla"}
+                        </span>
+                      )}
+                    </label>
+                    <label className="flex min-h-9 shrink-0 items-center gap-1.5 text-[10px] opacity-75">
+                      <Brain className="h-3.5 w-3.5" aria-hidden="true" />
+                      <span className="sr-only">{lang === "en" ? "Reasoning level" : "Düşünme seviyesi"}</span>
+                      <span className="w-[6.5rem]">
+                        <CustomSelect
+                          value={reasoningLevel}
+                          onChange={(value) => setReasoningLevel(normalizeReasoningLevel(value))}
+                          darkMode={darkMode}
+                          searchable={false}
+                          options={[
+                            { value: "auto", label: lang === "en" ? "Auto" : "Otomatik" },
+                            { value: "low", label: lang === "en" ? "Low" : "Düşük" },
+                            { value: "medium", label: lang === "en" ? "Medium" : "Orta" },
+                            { value: "high", label: lang === "en" ? "High" : "Yüksek" },
+                          ]}
+                        />
+                      </span>
+                    </label>
+                  </div>
+
+                  <div className="flex w-full min-w-0 items-end gap-2">
 
                   <button
                     type="button"
@@ -1905,9 +2355,10 @@ export default function HomeClient() {
                   <textarea
                     rows={1}
                     value={input}
+                    readOnly={isListening}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder={t.inputPlaceholder}
+                    placeholder={isListening ? (lang === "en" ? "Listening… speak now" : "Dinleniyor… şimdi konuş") : t.inputPlaceholder}
                     className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-1 py-2.5 text-sm outline-none"
                   />
 
@@ -1947,6 +2398,15 @@ export default function HomeClient() {
                       <ArrowUp className="h-4 w-4" />
                     </button>
                   )}
+                  </div>
+
+                  <p className="px-1 text-[10px] leading-relaxed opacity-50">
+                    {reasoningLevel !== "auto" && reasoningSupport === "unsupported"
+                      ? (lang === "en" ? "This model does not expose a reasoning control; the provider will use its default." : "Bu model düşünme seviyesi ayarını desteklemiyor; sağlayıcının varsayılanı kullanılacak.")
+                      : reasoningLevel === "high"
+                        ? (lang === "en" ? "High reasoning may use additional provider tokens and increase cost or latency." : "Yüksek düşünme desteklenen modellerde ek token ve maliyet/süre oluşturabilir.")
+                        : (lang === "en" ? `Chat input estimate ≈ ${estimatedChatInputTokens.toLocaleString("en-US")} tokens including history. Notes add source text; tasks add generated items. Provider counts are authoritative.` : `Sohbet giriş tahmini ≈ ${estimatedChatInputTokens.toLocaleString("tr-TR")} token (geçmiş dahil). Notlar kaynak metnini, görevler üretilen maddeleri ekler. Gerçek sayaç sağlayıcı verisidir.`)}
+                  </p>
                 </div>
 
                 <p className="mt-2 text-center text-[10px] opacity-40">
@@ -1957,6 +2417,127 @@ export default function HomeClient() {
           </>
         )}
       </main>
+
+      {isConnectionManagerOpen && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/65 p-3 backdrop-blur-sm sm:p-5"
+          onMouseDown={(event) => { if (event.target === event.currentTarget) setIsConnectionManagerOpen(false); }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="connection-manager-title"
+            className={`flex max-h-[min(90dvh,48rem)] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border shadow-2xl ${darkMode ? "border-zinc-700 bg-zinc-900 text-zinc-100" : "border-zinc-200 bg-white text-zinc-900"}`}
+          >
+            <header className={`flex shrink-0 items-start justify-between gap-3 border-b p-4 sm:p-5 ${darkMode ? "border-zinc-800" : "border-zinc-200"}`}>
+              <div className="min-w-0">
+                <h2 id="connection-manager-title" className="text-base font-semibold">
+                  {lang === "en" ? "API connections" : "API bağlantıları"}
+                </h2>
+                <p className="mt-1 text-xs leading-relaxed opacity-60">
+                  {lang === "en" ? "Change the active connection or its model here. API keys stay hidden in this list." : "Etkin bağlantıyı veya modelini buradan değiştir. API anahtarları bu listede gösterilmez."}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsConnectionManagerOpen(false)}
+                className="touch-target flex shrink-0 items-center justify-center rounded-xl opacity-60 hover:bg-zinc-500/10 hover:opacity-100"
+                aria-label={lang === "en" ? "Close" : "Kapat"}
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
+              {connectionNotice && (
+                <p role={connectionNoticeIsError ? "alert" : "status"} className={`rounded-xl border p-3 text-xs leading-relaxed ${connectionNoticeIsError ? "border-amber-500/30 bg-amber-500/10 text-amber-300" : "border-emerald-500/25 bg-emerald-500/10 text-emerald-300"}`}>
+                  {connectionNotice}
+                </p>
+              )}
+              {providers.map((provider) => {
+                const availableModels = Array.isArray(provider.availableModels)
+                  ? [...new Set([
+                      ...provider.availableModels.filter((model) => typeof model === "string" && model.trim() && model.length <= 200),
+                      ...(provider.model ? [provider.model] : []),
+                    ])].slice(0, 250)
+                  : (provider.model ? [provider.model] : []);
+                const isActive = provider.id === activeProviderId;
+                return (
+                  <article key={provider.id} className={`rounded-xl border p-3 sm:p-4 ${isActive ? "border-emerald-500/40" : darkMode ? "border-zinc-800" : "border-zinc-200"}`}>
+                    <div className="flex min-w-0 items-start justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { setActiveProviderId(provider.id); triggerHaptic("light"); }}
+                        className="min-h-10 min-w-0 flex-1 text-left"
+                        aria-pressed={isActive}
+                      >
+                        <span className="flex min-w-0 items-center gap-2">
+                          <span className="truncate text-sm font-semibold">{provider.name}</span>
+                          {isActive && <span className="shrink-0 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-semibold text-emerald-400">{lang === "en" ? "ACTIVE" : "ETKİN"}</span>}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[10px] opacity-50">{provider.type}</span>
+                      </button>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => refreshProviderModels(provider.id)}
+                          disabled={Boolean(refreshingProviderId)}
+                          className={`touch-target flex min-h-10 items-center gap-1.5 rounded-lg px-2 text-[10px] font-medium transition disabled:opacity-50 ${darkMode ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+                          aria-label={lang === "en" ? `Refresh models for ${provider.name}` : `${provider.name} modellerini yenile`}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 ${refreshingProviderId === provider.id ? "animate-spin" : ""}`} />
+                          <span className="hidden sm:inline">{lang === "en" ? "Refresh" : "Yenile"}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => requestDeleteProvider(provider.id)}
+                          className="touch-target flex items-center justify-center rounded-lg text-zinc-400 transition hover:bg-red-500/10 hover:text-red-400"
+                          aria-label={`${lang === "en" ? "Remove" : "Bağlantıyı kaldır"}: ${provider.name}`}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                    <label className="mt-3 block text-[10px] font-medium opacity-60">
+                      {lang === "en" ? `Model${availableModels.length ? ` · ${availableModels.length} available` : ""}` : `Model${availableModels.length ? ` · ${availableModels.length} kullanılabilir` : ""}`}
+                    </label>
+                    {availableModels.length > 0 ? (
+                      <div className="mt-1">
+                        <CustomSelect
+                          value={availableModels.includes(provider.model) ? provider.model : availableModels[0]}
+                          onChange={(value) => updateProviderModel(provider.id, value)}
+                          darkMode={darkMode}
+                          options={availableModels.map((model) => ({ value: model, label: model }))}
+                        />
+                      </div>
+                    ) : (
+                      <input
+                        type="text"
+                        value={provider.model || ""}
+                        maxLength={200}
+                        onChange={(event) => updateProviderModel(provider.id, event.target.value)}
+                        placeholder={lang === "en" ? "Model ID (refresh the list if supported)" : "Model kimliği (destekleniyorsa listeyi yenile)"}
+                        className={`mt-1 min-h-11 w-full rounded-lg border px-3 text-xs outline-none focus:border-emerald-500/60 ${darkMode ? "border-zinc-700 bg-zinc-950" : "border-zinc-300 bg-zinc-50"}`}
+                      />
+                    )}
+                  </article>
+                );
+              })}
+            </div>
+
+            <footer className={`flex shrink-0 flex-col-reverse gap-2 border-t p-4 sm:flex-row sm:justify-between sm:p-5 ${darkMode ? "border-zinc-800" : "border-zinc-200"}`}>
+              <p className="self-center text-[10px] leading-relaxed opacity-50">{lang === "en" ? "Changing a model keeps the same API connection." : "Model değişikliği aynı API bağlantısını kullanır."}</p>
+              <button
+                type="button"
+                onClick={() => { setIsConnectionManagerOpen(false); setIsModalOpen(true); }}
+                className={`flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 text-xs font-semibold ${darkMode ? "bg-white text-zinc-950 hover:bg-zinc-200" : "bg-zinc-900 text-white hover:bg-zinc-800"}`}
+              >
+                <Plus className="h-4 w-4" />{lang === "en" ? "Add API connection" : "API bağlantısı ekle"}
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
 
       <ProviderModal
         isOpen={isModalOpen}

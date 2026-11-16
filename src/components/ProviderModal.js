@@ -7,60 +7,147 @@ import CustomSelect from "./CustomSelect";
 
 const PRESETS = [
   {
-    label: "Groq (Ücretsiz & Ultra Hızlı)",
+    name: "Groq",
+    label: "Groq API",
     type: "openai-compatible",
     baseUrl: "https://api.groq.com/openai/v1",
-    model: "llama-3.3-70b-versatile",
+    model: "",
     placeholderKey: "gsk_...",
-    hint: "console.groq.com üzerinden ücretsiz API Key alabilirsin (Metin ve Kod için en hızlısı).",
+    billingLabel: "Ücretsiz limit + ücretli kullanım",
+    setup: [
+      "Groq Console hesabı oluştur veya giriş yap.",
+      "API Keys bölümünde Create API Key seç; anahtarı kopyala ve güvenli yerde tut.",
+      "Anahtarı aşağıya yapıştırıp Doğrula'ya bas. KineticAI hesabında kullanılabilir modelleri getirir.",
+    ],
+    billing: "Ücretsiz katmanda istek ve token hız sınırları var. Daha yüksek limitler için kullanıma göre ücretlenen Developer katmanı bulunuyor.",
+    security: "Ücretsiz/ücretli limitler hesap ve modele göre değişebilir. Güncel sınırları Console'daki Limits bölümünden kontrol et.",
+    links: [
+      { label: "API anahtarı oluştur", href: "https://console.groq.com/keys" },
+      { label: "Ücret ve limitler", href: "https://console.groq.com/docs/billing-faqs" },
+      { label: "API hızlı başlangıç", href: "https://console.groq.com/docs/quickstart" },
+    ],
   },
   {
-    label: "OpenRouter (Ücretsiz Görsel & Metin AI)",
+    name: "OpenRouter",
+    label: "OpenRouter API",
     type: "openai-compatible",
     baseUrl: "https://openrouter.ai/api/v1",
-    model: "meta-llama/llama-3.3-70b-instruct:free",
+    model: "",
     placeholderKey: "sk-or-...",
-    hint: "openrouter.ai üzerinden ücretsiz anahtar al. ':free' etiketli modeller hem metin hem görsel destekler.",
+    billingLabel: "Ücretsiz ve ücretli model seçenekleri",
+    setup: [
+      "OpenRouter hesabı aç veya giriş yap.",
+      "Settings → API Keys sayfasında Create Key seçip bir anahtar oluştur.",
+      "Anahtarı yapıştırıp Doğrula'ya bas. Bağlantıdan sonra kullanılabilir modelleri sohbet ekranından değiştirebilirsin.",
+    ],
+    billing: "Ücretsiz modeller var; model kimliğinin :free varyantı veya openrouter/free yönlendiricisi kullanılabilir. Ücretsiz modellerin hız/günlük sınırları olur. Ücretli modeller kredi bakiyesinden, seçilen modelin fiyatına göre düşer; kredi alımında platform ücreti uygulanabilir.",
+    security: "Her modelin fiyatı ve görsel desteği farklıdır. Ücretsiz sanılan bir model yerine seçim ekranında model etiketini ve güncel fiyatını kontrol et.",
+    links: [
+      { label: "API anahtarı oluştur", href: "https://openrouter.ai/settings/keys" },
+      { label: "Ücretsiz modeller", href: "https://openrouter.ai/collections/free-models" },
+      { label: "Ücretler ve kredi sistemi", href: "https://openrouter.ai/pricing" },
+    ],
   },
   {
-    label: "Ollama (Uzak HTTPS Sunucusu)",
+    name: "Ollama Uzak Sunucu",
+    label: "Ollama (uzak HTTPS sunucusu)",
     type: "ollama",
     baseUrl: "",
     model: "llama3.2",
     placeholderKey: "Bearer proxy tokeni",
-    hint: "KineticAI sunucusunun erişebildiği, HTTPS kullanan ve Bearer token isteyen bir Ollama proxy adresi girin. localhost ve özel ağ adresleri güvenlik için engellenir.",
+    billingLabel: "Yerel ücretsiz / bulut ücretli olabilir",
+    setup: [
+      "Ollama'yı kendi bilgisayarında veya internete açık bir sunucuda kurup modeli indir.",
+      "KineticAI web sunucusu senin bilgisayarındaki localhost adresine erişemez. Bu nedenle herkese açık HTTPS adresi olan, Bearer token ile korunan bir Ollama proxy/sunucusu gerekir.",
+      "HTTPS sunucu adresini ve proxy tokenini gir; Doğrula ile bağlantıyı dene. Kurulu modeller bağlantıdan sonra sohbet ekranında listelenir.",
+    ],
+    billing: "Kendi bilgisayarında yerel çalıştırma için Ollama yazılımı ücretsizdir; donanım ve elektrik sana aittir. Bulut sunucu/proxy kullanırsan sunucu veya bulut model ücretleri çıkabilir.",
+    security: "Bu gelişmiş bir kurulumdur. Ollama portunu internete kimlik doğrulamasız açma; KineticAI localhost ve özel ağ adreslerini bilerek engeller.",
+    links: [
+      { label: "Ollama'yı indir", href: "https://ollama.com/download" },
+      { label: "Kurulum rehberi", href: "https://docs.ollama.com/quickstart" },
+      { label: "Ollama bulut fiyatları", href: "https://ollama.com/pricing" },
+    ],
   },
   {
-    label: "Google Gemini (Kendi API Anahtarın)",
+    name: "Google Gemini",
+    label: "Google Gemini API",
     type: "gemini",
     baseUrl: "",
-    model: "gemini-2.0-flash",
+    model: "",
     placeholderKey: "AIzaSy...",
-    hint: "aistudio.google.com üzerinden alınan kişisel anahtar (bölgesel kotalara tabidir).",
+    billingLabel: "Ücretsiz katman + ücretli katman",
+    setup: [
+      "Google AI Studio'ya Google hesabınla giriş yap.",
+      "API keys sayfasında Create API key seç. Yeni anahtar bir Google Cloud projesine bağlanır.",
+      "Anahtarı yapıştırıp Doğrula'ya bas; anahtarına açık modeller listelenecek.",
+    ],
+    billing: "Bazı Gemini modellerinde sınırlı ücretsiz katman bulunur. Ücretli katman için projeye faturalandırma bağlanır ve seçilen modelin token kullanımı ücretlendirilir.",
+    security: "Google'ın fiyatlandırma sayfasında ücretsiz katmandaki içeriklerin ürünleri geliştirmek için kullanılabileceği belirtiliyor. Hassas verileri göndermeden önce veri kullanım koşullarını incele.",
+    links: [
+      { label: "API anahtarı oluştur", href: "https://aistudio.google.com/app/apikey" },
+      { label: "Ücret ve ücretsiz katman", href: "https://ai.google.dev/gemini-api/docs/pricing" },
+      { label: "Faturalandırmayı ayarla", href: "https://ai.google.dev/gemini-api/docs/billing" },
+    ],
   },
   {
-    label: "OpenAI (ChatGPT)",
+    name: "OpenAI",
+    label: "OpenAI API (ChatGPT'den ayrı)",
     type: "openai-compatible",
     baseUrl: "https://api.openai.com/v1",
-    model: "gpt-4o-mini",
+    model: "",
     placeholderKey: "sk-...",
-    hint: "OpenAI platformundan alınan API Key.",
+    billingLabel: "Kullanıma göre ücretli API",
+    setup: [
+      "OpenAI Platform'a giriş yap ve bir proje seç veya oluştur.",
+      "Project API keys bölümünden Create new secret key seç; anahtarı oluştururken uygun proje/izinleri belirle ve kopyala.",
+      "API Platform billing bölümünde ödeme yöntemini ve harcama sınırını kontrol et. Anahtarı yapıştırıp Doğrula'ya bas.",
+    ],
+    billing: "API kullanımı model ve token başına ayrıca ücretlenir. ChatGPT Plus aboneliği normalde API kullanımını içermez; varsa hesabına özel promosyon kredileri ayrıdır.",
+    security: "Maliyet model, girdi/çıktı tokenı ve araç kullanımına bağlıdır. Harcama/limit ayarlarını API Platform'dan kontrol et.",
+    links: [
+      { label: "API anahtarı oluştur", href: "https://platform.openai.com/api-keys" },
+      { label: "API model fiyatları", href: "https://platform.openai.com/pricing" },
+      { label: "ChatGPT ve API faturalandırması", href: "https://help.openai.com/en/articles/9039756-managing-billing-for-chatgpt-and-the-api-platform" },
+    ],
   },
   {
-    label: "Anthropic (Claude)",
+    name: "Anthropic Claude",
+    label: "Anthropic API (Claude'dan ayrı)",
     type: "anthropic",
     baseUrl: "https://api.anthropic.com/v1",
-    model: "claude-3-5-sonnet-latest",
+    model: "",
     placeholderKey: "sk-ant-...",
-    hint: "Anthropic Console API Key.",
+    billingLabel: "Ön ödemeli API kredisi",
+    setup: [
+      "Anthropic Console hesabı aç veya giriş yap.",
+      "Billing bölümünde API kullanım kredisi ekle; ardından Settings → API Keys bölümünden anahtar oluştur.",
+      "Anahtarı yapıştırıp Doğrula'ya bas. Kullanılabilir Claude modellerini bağlantıdan sonra sohbet ekranından değiştirebilirsin.",
+    ],
+    billing: "Claude.ai Free/Pro/Max aboneliği API kullanımını kapsamaz. API Console kullanımı için önceden kredi yüklenir ve istekler modelin token fiyatına göre bu bakiyeden düşer.",
+    security: "Kredi ve fiyatlandırma koşulları değişebilir; otomatik kredi yükleme açıksa ayrıca kontrol et.",
+    links: [
+      { label: "API anahtarı oluştur", href: "https://console.anthropic.com/settings/keys" },
+      { label: "API fiyatları", href: "https://www.anthropic.com/pricing#api" },
+      { label: "Kredi yükleme rehberi", href: "https://support.anthropic.com/en/articles/8977456-how-do-i-pay-for-my-api-usage" },
+    ],
   },
   {
-    label: "Özel / Custom AI Endpoint",
+    name: "Özel AI",
+    label: "Özel AI endpoint",
     type: "custom",
     baseUrl: "",
     model: "custom-model",
     placeholderKey: "İsteğe bağlı Token",
-    hint: "Kendi modelinizin herkese açık HTTPS endpoint adresini girin. localhost ve özel ağ adresleri güvenlik için engellenir.",
+    billingLabel: "Endpoint sağlayıcısına bağlı",
+    setup: [
+      "Kullandığın AI sunucusunda veya sağlayıcı panelinde API erişimini etkinleştir ve gerekiyorsa anahtar oluştur.",
+      "Sağlayıcının HTTPS endpoint adresini, istediği istek biçimini, model kimliğini ve yanıt JSON biçimini öğren. KineticAI; reply, response, text, output veya OpenAI uyumlu choices alanını okuyabilir.",
+      "Endpoint adresini ve gerekiyorsa anahtarı girip Doğrula'ya bas. Model kimliği bağlantıdan sonra yönetilebilir; fiyat ve kota endpoint sağlayıcının koşullarına bağlıdır.",
+    ],
+    billing: "KineticAI bu endpoint için ücret belirlemez. Ücretsiz/ücretli kullanım, kota, gizlilik ve faturalandırmayı endpoint sağlayıcısından doğrula.",
+    security: "Yalnızca güvendiğin HTTPS sunucularını kullan. localhost, özel ağ ve güvenli olmayan adresler engellenir.",
+    links: [],
   },
 ];
 
@@ -97,7 +184,7 @@ async function callVerifyEndpoint(providerData) {
 
 export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
-  const [name, setName] = useState("Groq");
+  const [name, setName] = useState(PRESETS[0].name);
   const [type, setType] = useState(PRESETS[0].type);
   const [baseUrl, setBaseUrl] = useState(PRESETS[0].baseUrl);
   const [model, setModel] = useState(PRESETS[0].model);
@@ -118,13 +205,20 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
     setVerifyError("");
   };
 
+  const closeModal = () => {
+    setApiKey("");
+    resetVerification();
+    onClose();
+  };
+
   const handlePresetChange = (index) => {
     const p = PRESETS[index];
     setSelectedPresetIndex(index);
     setType(p.type);
     setBaseUrl(p.baseUrl);
     setModel(p.model);
-    setName(p.label.split(" (")[0]);
+    setName(p.name);
+    setApiKey("");
     resetVerification();
   };
 
@@ -143,10 +237,7 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
 
       setIsVerified(true);
       if (Array.isArray(data.models) && data.models.length > 0) {
-        setAvailableModels(data.models);
-        if (!data.models.includes(model)) {
-          setModel(data.models[0]);
-        }
+        setAvailableModels([...new Set(data.models)].slice(0, 250));
       }
     } catch (err) {
       setVerifyError(err.message);
@@ -159,57 +250,47 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
     e.preventDefault();
     if (!name.trim()) return;
 
-    if (!isVerified) {
-      setIsVerifying(true);
-      setVerifyError("");
-      try {
-        const data = await callVerifyEndpoint({
-          type,
-          baseUrl: baseUrl.trim(),
-          apiKey: apiKey.trim(),
-          model: model.trim(),
-        });
+    setIsVerifying(true);
+    setVerifyError("");
+    try {
+      const data = isVerified
+        ? { models: availableModels }
+        : await callVerifyEndpoint({
+            type,
+            baseUrl: baseUrl.trim(),
+            apiKey: apiKey.trim(),
+            model: model.trim(),
+          });
+      const models = Array.isArray(data.models)
+        ? [...new Set(data.models.filter((item) => typeof item === "string" && item.trim()))].slice(0, 250)
+        : [];
+      const preferredModel = model.trim();
+      const initialModel = models.includes(preferredModel)
+        ? preferredModel
+        : models[0] || preferredModel || "custom-model";
+      const result = onAdd({
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        name: name.trim(),
+        type,
+        baseUrl: baseUrl.trim(),
+        model: initialModel,
+        availableModels: models,
+        apiKey: apiKey.trim(),
+        verified: true,
+      });
 
-        const finalModel =
-          Array.isArray(data.models) &&
-          data.models.length > 0 &&
-          !data.models.includes(model.trim())
-            ? data.models[0]
-            : model.trim();
-
-        onAdd({
-          id: Date.now().toString(),
-          name: name.trim(),
-          type,
-          baseUrl: baseUrl.trim(),
-          model: finalModel,
-          apiKey: apiKey.trim(),
-          verified: true,
-        });
-        setApiKey("");
-        resetVerification();
-        onClose();
-      } catch (err) {
-        setVerifyError(err.message);
-      } finally {
-        setIsVerifying(false);
+      if (result?.duplicate) {
+        setVerifyError(result.message);
+        return;
       }
-      return;
+      setApiKey("");
+      resetVerification();
+      closeModal();
+    } catch (err) {
+      setVerifyError(err.message);
+    } finally {
+      setIsVerifying(false);
     }
-
-    onAdd({
-      id: Date.now().toString(),
-      name: name.trim(),
-      type,
-      baseUrl: baseUrl.trim(),
-      model: model.trim(),
-      apiKey: apiKey.trim(),
-      verified: true,
-    });
-
-    setApiKey("");
-    resetVerification();
-    onClose();
   };
 
   const cardClass = darkMode
@@ -221,14 +302,14 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-sm animate-fadeIn">
-      <div className={`w-full max-w-lg rounded-2xl border p-6 shadow-2xl animate-scaleIn ${cardClass}`}>
+      <div className={`max-h-[92dvh] w-full max-w-xl overflow-y-auto overscroll-contain rounded-2xl border p-4 shadow-2xl animate-scaleIn sm:p-6 ${cardClass}`}>
         <div className="mb-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-500" />
             <h2 className="text-base font-semibold">Doğrulanmış AI Bağlantısı Ekle</h2>
           </div>
           <button
-            onClick={onClose}
+            onClick={closeModal}
             className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg opacity-60 transition hover:opacity-100"
             aria-label="Kapat"
           >
@@ -251,8 +332,46 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
                 label: p.label,
               }))}
             />
-            <p className="mt-1.5 text-xs opacity-60">{currentPreset.hint}</p>
           </div>
+
+          <section className={`rounded-xl border p-4 ${darkMode ? "border-violet-400/20 bg-violet-400/[0.05]" : "border-violet-200 bg-violet-50/70"}`} aria-live="polite">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h3 className="text-sm font-semibold">{currentPreset.name} kurulum rehberi</h3>
+              <span className={`max-w-[55%] shrink-0 whitespace-normal rounded-full px-2 py-1 text-right text-[10px] font-semibold leading-3 ${darkMode ? "bg-violet-300/10 text-violet-200" : "bg-violet-100 text-violet-700"}`}>
+                {currentPreset.billingLabel}
+              </span>
+            </div>
+            <ol className="space-y-2.5 text-xs leading-5 opacity-80">
+              {currentPreset.setup.map((step, index) => (
+                <li key={step} className="flex gap-2.5">
+                  <span className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${darkMode ? "bg-violet-300/15 text-violet-200" : "bg-violet-100 text-violet-700"}`}>
+                    {index + 1}
+                  </span>
+                  <span>{step}</span>
+                </li>
+              ))}
+            </ol>
+            <div className={`mt-3 rounded-lg border p-3 text-xs leading-5 ${darkMode ? "border-white/[0.06] bg-black/20" : "border-violet-200/70 bg-white/70"}`}>
+              <p><strong>Ücretsiz / ücretli:</strong> {currentPreset.billing}</p>
+              <p className="mt-2 opacity-70">{currentPreset.security}</p>
+              <p className="mt-2 font-medium">Varsa API ücreti KineticAI&apos;ye değil, doğrudan sağlayıcı hesabına yansır.</p>
+            </div>
+            {currentPreset.links.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {currentPreset.links.map((link) => (
+                  <a
+                    key={link.href}
+                    href={link.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className={`inline-flex min-h-9 items-center rounded-lg border px-2.5 py-1.5 text-[11px] font-medium transition ${darkMode ? "border-white/10 bg-white/[0.04] text-violet-200 hover:bg-white/[0.08]" : "border-violet-200 bg-white text-violet-700 hover:bg-violet-100"}`}
+                  >
+                    {link.label} ↗
+                  </a>
+                ))}
+              </div>
+            )}
+          </section>
 
           <div>
             <label className="mb-1.5 block text-xs font-medium opacity-60">
@@ -300,27 +419,18 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
                 Doğrula
               </button>
             </div>
+            <p className="mt-1.5 text-[11px] leading-4 opacity-55">
+              Anahtar gizli bilgi gibidir: kimseyle paylaşma. KineticAI bağlantı ayarını bu tarayıcıda saklar ve istek sırasında KineticAI sunucusu üzerinden seçtiğin sağlayıcıya iletir.
+            </p>
           </div>
 
-          <div>
-            <label className="mb-1.5 block text-xs font-medium opacity-60">
-              Model {availableModels.length > 0 && `(${availableModels.length} aktif model bulundu)`}
-            </label>
-            {availableModels.length > 0 ? (
-              <CustomSelect
-                value={model}
-                onChange={(val) => setModel(val)}
-                darkMode={darkMode}
-                options={availableModels.map((m) => ({ value: m, label: m }))}
-              />
-            ) : (
-              <input
-                type="text"
-                value={model}
-                onChange={(e) => setModel(e.target.value)}
-                className={`min-h-[44px] w-full rounded-xl border px-3 text-sm outline-none ${inputClass}`}
-              />
-            )}
+          <div className={`rounded-xl border px-3 py-3 text-xs leading-relaxed ${darkMode ? "border-zinc-800 bg-zinc-950/60 text-zinc-300" : "border-zinc-200 bg-zinc-50 text-zinc-700"}`}>
+            <p className="font-medium">Modeli şimdi seçmen gerekmiyor.</p>
+            <p className="mt-1 opacity-70">
+              {availableModels.length > 0
+                ? `${availableModels.length} kullanılabilir model bulundu. Bağlantıyı kaydedince sohbet alanından istediğini seçebilirsin.`
+                : "Bağlantı kaydedildikten sonra sohbet alanından model seçebilir; eski bağlantılar için model listesini yenileyebilirsin."}
+            </p>
           </div>
 
           {type !== "gemini" && (
@@ -359,7 +469,7 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
           <div className="flex justify-end gap-2 pt-2">
             <button
               type="button"
-              onClick={onClose}
+              onClick={closeModal}
               className="min-h-[44px] rounded-xl border border-zinc-700/40 px-4 text-sm opacity-80 hover:opacity-100"
             >
               İptal

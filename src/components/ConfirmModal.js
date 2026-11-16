@@ -1,6 +1,7 @@
 // src/components/ConfirmModal.js
 "use client";
 
+import { useEffect, useRef } from "react";
 import { AlertTriangle, X } from "lucide-react";
 
 export default function ConfirmModal({
@@ -14,15 +15,66 @@ export default function ConfirmModal({
   onCancel,
   darkMode,
 }) {
+  const dialogRef = useRef(null);
+  const cancelButtonRef = useRef(null);
+  const onCancelRef = useRef(onCancel);
+
+  useEffect(() => {
+    onCancelRef.current = onCancel;
+  }, [onCancel]);
+
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const previouslyFocused = document.activeElement;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    cancelButtonRef.current?.focus();
+
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onCancelRef.current?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = dialogRef.current?.querySelectorAll(
+        'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])'
+      );
+      if (!focusable?.length) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.body.style.overflow = previousOverflow;
+      previouslyFocused?.focus?.();
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeIn"
-      role="dialog"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onCancel?.();
+      }}
+      role="alertdialog"
       aria-modal="true"
+      aria-labelledby="kinetic-confirm-title"
+      aria-describedby="kinetic-confirm-description"
     >
       <div
+        ref={dialogRef}
         className={`w-full max-w-sm rounded-2xl border p-6 shadow-2xl animate-scaleIn ${
           darkMode
             ? "border-zinc-800 bg-zinc-900 text-zinc-100"
@@ -38,23 +90,26 @@ export default function ConfirmModal({
             >
               <AlertTriangle className="h-4 w-4" />
             </div>
-            <h3 className="text-sm font-semibold">{title}</h3>
+            <h3 id="kinetic-confirm-title" className="text-sm font-semibold">{title}</h3>
           </div>
           <button
             onClick={onCancel}
-            className="flex min-h-[40px] min-w-[40px] items-center justify-center rounded-lg opacity-60 hover:opacity-100"
+            type="button"
+            className="touch-target flex items-center justify-center rounded-lg opacity-70 hover:opacity-100"
+            aria-label={cancelText}
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
-        <p className="mb-5 text-xs leading-relaxed opacity-75">{description}</p>
+        <p id="kinetic-confirm-description" className="mb-5 text-xs leading-relaxed opacity-75">{description}</p>
 
         <div className="flex gap-2.5">
           <button
             type="button"
             onClick={onCancel}
-            className={`min-h-[44px] flex-1 rounded-xl border px-4 text-xs font-medium transition ${
+            ref={cancelButtonRef}
+            className={`min-h-12 flex-1 rounded-xl border px-4 text-xs font-medium transition ${
               darkMode
                 ? "border-zinc-700 hover:bg-zinc-800"
                 : "border-zinc-300 hover:bg-zinc-100"
@@ -65,7 +120,7 @@ export default function ConfirmModal({
           <button
             type="button"
             onClick={onConfirm}
-            className={`min-h-[44px] flex-1 rounded-xl px-4 text-xs font-semibold transition ${
+            className={`min-h-12 flex-1 rounded-xl px-4 text-xs font-semibold transition ${
               danger
                 ? "bg-red-600 text-white hover:bg-red-500"
                 : "bg-emerald-500 text-zinc-950 hover:bg-emerald-400"

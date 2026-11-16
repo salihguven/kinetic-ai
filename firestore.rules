@@ -22,7 +22,12 @@ service cloud.firestore {
         'moderationReason',
         'moderationUpdatedAt',
         'dailyCount',
-        'lastResetDate'
+        'lastResetDate',
+        'monthlyQuotaResetMonth',
+        'monthlyQuotaResetAt',
+        'tokenUsageDate',
+        'dailyTokenUsage',
+        'tokenUsageByModel'
       ];
     }
 

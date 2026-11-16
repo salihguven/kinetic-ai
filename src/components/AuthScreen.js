@@ -22,6 +22,7 @@ import {
   Moon,
 } from "lucide-react";
 import KineticLogo from "./KineticLogo";
+import BetaBadge from "./BetaBadge";
 import LegalModal from "./LegalModal";
 import AuthBackground from "./AuthBackground";
 
@@ -130,9 +131,12 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
           <div className="mb-3">
             <KineticLogo size={44} darkMode={darkMode} />
           </div>
-          <h2 className="text-xl font-bold tracking-tight">KineticAI</h2>
-          <p className="mt-1 text-xs opacity-60">
-            Ücretsiz, açık ve modüler yapay zeka çalışma alanı.
+          <div className="flex items-center justify-center gap-2">
+            <h2 className="text-xl font-bold tracking-tight">KineticAI</h2>
+            <BetaBadge darkMode={darkMode} />
+          </div>
+          <p className="mt-1 max-w-xs text-xs leading-5 opacity-60">
+            Beta sürümü. Kendi AI sağlayıcı hesabınız ve anahtarınız gerekir; sağlayıcıların ücret ve kota koşulları ayrıca geçerlidir.
           </p>
         </div>
 

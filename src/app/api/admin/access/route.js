@@ -28,6 +28,7 @@ export async function GET(request) {
     return NextResponse.json({
       authenticated: true,
       isAdmin: user.isAdmin === true,
+      isFounder: user.isFounder === true,
       isTester: user.isTester === true,
       email: user.email,
       name: user.name,

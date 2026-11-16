@@ -32,10 +32,14 @@ function filterAndSortModels(ids, priorityList) {
     "dall-e",
     "sora",
     "audio",
+    "orpheus",
   ];
 
-  return ids
-    .filter((id) => !ignored.some((bad) => id.toLowerCase().includes(bad)))
+  return [...new Set(ids
+    .filter((id) => typeof id === "string")
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0 && id.length <= 200 && !/[\u0000-\u001f\u007f]/.test(id))
+    .filter((id) => !ignored.some((bad) => id.toLowerCase().includes(bad))))]
     .sort((a, b) => {
       const aScore = priorityList.findIndex((p) => a.toLowerCase().includes(p));
       const bScore = priorityList.findIndex((p) => b.toLowerCase().includes(p));
@@ -43,7 +47,7 @@ function filterAndSortModels(ids, priorityList) {
       if (aScore !== -1) return -1;
       if (bScore !== -1) return 1;
       return a.localeCompare(b);
-    });
+    }).slice(0, 250);
 }
 
 export async function POST(request) {
@@ -157,15 +161,10 @@ export async function POST(request) {
       }
 
       const rawModels = (data?.data || []).map((m) => m.id);
-      const models = filterAndSortModels(rawModels, [
-        "llama-3.3-70b",
-        "llama-3.1-8b",
-        "llama-4",
-        "qwen",
-        "gpt-oss",
-        "gpt-4o",
-        "deepseek",
-      ]);
+      const preferredModels = rootBase.includes("openrouter.ai")
+        ? [":free", "openrouter/free", "llama-3.3-70b", "llama-3.1-8b", "qwen", "gpt-oss", "deepseek"]
+        : ["llama-3.3-70b", "llama-3.1-8b", "llama-4", "qwen", "gpt-oss", "gpt-4o", "deepseek"];
+      const models = filterAndSortModels(rawModels, preferredModels);
 
       return NextResponse.json({ valid: true, models });
     }
@@ -189,7 +188,7 @@ export async function POST(request) {
           { status: 401 }
         );
       }
-      const models = (data?.data || []).map((m) => m.id);
+      const models = filterAndSortModels((data?.data || []).map((m) => m.id), []);
       return NextResponse.json({ valid: true, models });
     }
 
@@ -207,7 +206,7 @@ export async function POST(request) {
           { status: 400 }
         );
       }
-      const models = (data?.models || []).map((m) => m.name);
+      const models = filterAndSortModels((data?.models || []).map((m) => m.name), []);
       return NextResponse.json({ valid: true, models });
     }
 

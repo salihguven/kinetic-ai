@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="tr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#09090b" />
+    <title>Bağlantı yok | KineticAI</title>
+    <style>
+      :root { color-scheme: dark; font-family: system-ui, sans-serif; background: #09090b; color: #f4f4f5; }
+      * { box-sizing: border-box; }
+      body { min-height: 100svh; margin: 0; display: grid; place-items: center; padding: max(24px, env(safe-area-inset-top)) 24px max(24px, env(safe-area-inset-bottom)); }
+      main { width: min(100%, 440px); text-align: center; }
+      img { width: 56px; height: 56px; margin-bottom: 20px; }
+      h1 { margin: 0 0 10px; font-size: 1.4rem; }
+      p { margin: 0 auto 24px; color: #a1a1aa; line-height: 1.6; }
+      button { min-width: 48px; min-height: 48px; border: 0; border-radius: 12px; padding: 0 18px; background: #10b981; color: #03271c; font: inherit; font-weight: 700; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img src="/icons/kineticai.svg" alt="KineticAI" />
+      <h1>Şu anda çevrimdışısın</h1>
+      <p>Sohbetleri ve yapay zeka yanıtlarını yüklemek için internet bağlantısı gerekiyor. Bağlantını kontrol edip yeniden deneyebilirsin.</p>
+      <button type="button" onclick="window.location.reload()">Yeniden dene</button>
+    </main>
+  </body>
+</html>

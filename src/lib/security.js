@@ -3,6 +3,16 @@
 import { lookup } from "node:dns/promises";
 
 const requestLog = new Map();
+let nextRateLimitCleanupAt = 0;
+const RATE_LIMIT_CLEANUP_INTERVAL_MS = 15_000;
+
+function pruneExpiredRateLimitEntries(now) {
+  if (now < nextRateLimitCleanupAt) return;
+  nextRateLimitCleanupAt = now + RATE_LIMIT_CLEANUP_INTERVAL_MS;
+  for (const [key, entry] of requestLog) {
+    if (entry.expiresAt <= now) requestLog.delete(key);
+  }
+}
 
 function isPrivateIPv4(host) {
   const parts = host.split(".").map(Number);
@@ -30,26 +40,20 @@ export function checkRateLimit(request, limit = 20, windowMs = 60_000) {
     "local-user";
 
   const now = Date.now();
-  if (requestLog.size > 20_000) {
-    for (const [key, value] of requestLog) {
-      if (now - value.startTime > windowMs) requestLog.delete(key);
-    }
-  }
+  pruneExpiredRateLimitEntries(now);
   const existing = requestLog.get(ip);
   if (!existing && requestLog.size >= 20_000) {
     return { allowed: false, message: "Sunucu şu anda yoğun. Lütfen biraz sonra tekrar deneyin." };
   }
-  const entry = existing || { count: 0, startTime: now };
 
-  if (now - entry.startTime > windowMs) {
-    entry.count = 1;
-    entry.startTime = now;
+  if (!existing || now - existing.startTime > windowMs) {
+    const entry = { count: 1, startTime: now, expiresAt: now + windowMs };
     requestLog.set(ip, entry);
     return { allowed: true };
   }
 
+  const entry = existing;
   entry.count += 1;
-  requestLog.set(ip, entry);
 
   if (entry.count > limit) {
     return {
@@ -57,8 +61,6 @@ export function checkRateLimit(request, limit = 20, windowMs = 60_000) {
       message: "Çok hızlı istek gönderiyorsunuz. Güvenlik nedeniyle 1 dakika bekleyin.",
     };
   }
-
-  if (requestLog.size <= 20_000) requestLog.set(ip, entry);
 
   return { allowed: true };
 }

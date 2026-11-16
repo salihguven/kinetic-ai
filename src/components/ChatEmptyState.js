@@ -13,33 +13,45 @@ const QUICK_CARDS = [
     key: "chat",
     icon: MessageSquare,
     title: "Sohbete Başla",
+    titleEn: "Start a chat",
     desc: "Aklındaki herhangi bir konuda soru sor.",
+    descEn: "Ask a question about anything on your mind.",
     color: "emerald",
     prompt: "Merhaba! Bana kısaca neler yapabildiğini anlatır mısın?",
+    promptEn: "Hi! Briefly tell me what you can help me with.",
   },
   {
     key: "code",
     icon: Code2,
     title: "Kod Yardımı Al",
+    titleEn: "Get coding help",
     desc: "Hata ayıkla, fonksiyon yaz veya kodunu incelet.",
+    descEn: "Debug an issue, write a function, or review your code.",
     color: "sky",
     prompt: "JavaScript ile bir dizinin elemanlarını tersten yazdıran fonksiyon yaz.",
+    promptEn: "Write a JavaScript function that prints an array in reverse order.",
   },
   {
     key: "write",
     icon: Mail,
     title: "Metin / E-posta Yazdır",
+    titleEn: "Write a message or email",
     desc: "Profesyonel bir e-posta veya metin taslağı oluştur.",
+    descEn: "Draft a professional email or other text.",
     color: "amber",
     prompt: "İşe geç kaldığım için yöneticime kısa, profesyonel bir e-posta yaz.",
+    promptEn: "Write a brief, professional email to my manager explaining that I will be late.",
   },
   {
     key: "web",
     icon: Globe,
     title: "Güncel Bilgi Sor",
+    titleEn: "Ask about current events",
     desc: "Web'den canlı arama yaparak güncel veriler getir.",
+    descEn: "Search the web for current information and sources.",
     color: "violet",
     prompt: "Bugün dolar kuru ne durumda?",
+    promptEn: "What is the latest USD exchange rate today?",
     enablesWeb: true,
   },
 ];
@@ -80,28 +92,32 @@ export default function ChatEmptyState({
       </h2>
       <p className="animate-fadeSlideUp delay-2 mb-6 mt-1 max-w-md text-xs leading-relaxed opacity-65">
         {hasProviders
-          ? "Aşağıdaki hızlı başlangıç kartlarından birini seç ya da doğrudan mesaj yaz."
-          : "Başlamak için önce bir yapay zeka sağlayıcısı bağlaman gerekiyor."}
+          ? lang === "en"
+            ? "Choose a quick start below or write your own message."
+            : "Aşağıdaki hızlı başlangıç kartlarından birini seç ya da doğrudan mesaj yaz."
+          : lang === "en"
+            ? "Connect an AI provider to get started."
+            : "Başlamak için önce bir yapay zeka sağlayıcısı bağlaman gerekiyor."}
       </p>
 
       {!hasProviders ? (
         <button
           onClick={onOpenProviderModal}
-          className={`animate-fadeSlideUp delay-3 flex min-h-[44px] items-center gap-2 rounded-xl px-5 text-xs font-semibold transition hover:scale-[1.03] ${
+          className={`animate-fadeSlideUp delay-3 flex min-h-12 items-center gap-2 rounded-xl px-5 text-xs font-semibold transition hover:scale-[1.03] ${
             darkMode
               ? "bg-white text-zinc-950 hover:bg-zinc-200"
               : "bg-zinc-900 text-white hover:bg-zinc-800"
           }`}
         >
           <Plus className="h-4 w-4" />
-          Yapay Zeka Bağla
+          {lang === "en" ? "Connect an AI provider" : "Yapay Zeka Bağla"}
         </button>
       ) : (
         <div className="grid w-full max-w-2xl grid-cols-1 gap-3 sm:grid-cols-2">
           {QUICK_CARDS.map((card, idx) => (
             <button
               key={card.key}
-              onClick={() => onQuickPrompt(card.prompt, card.enablesWeb)}
+              onClick={() => onQuickPrompt(lang === "en" ? card.promptEn : card.prompt, card.enablesWeb)}
               style={{ animationDelay: `${300 + idx * 90}ms` }}
               className={`animate-fadeSlideUp group flex items-start gap-3 rounded-xl border p-3.5 text-left transition hover:-translate-y-0.5 ${
                 darkMode ? "bg-zinc-900/50" : "bg-white"
@@ -109,8 +125,8 @@ export default function ChatEmptyState({
             >
               <card.icon className="mt-0.5 h-4 w-4 shrink-0" />
               <div className="min-w-0">
-                <p className="text-xs font-semibold">{card.title}</p>
-                <p className="mt-0.5 text-[11px] leading-relaxed opacity-60">{card.desc}</p>
+                <p className="text-xs font-semibold">{lang === "en" ? card.titleEn : card.title}</p>
+                <p className="mt-0.5 text-[11px] leading-relaxed opacity-70">{lang === "en" ? card.descEn : card.desc}</p>
               </div>
             </button>
           ))}

@@ -48,10 +48,13 @@ export function checkContentModeration(text = "") {
   const words = normalized.split(" ");
 
   for (const bad of BAD_WORDS) {
-    if (
-      words.includes(bad) ||
-      (bad.length >= 4 && normalized.includes(bad))
-    ) {
+    const matchesWholeWord = words.some((word) => {
+      if (word === bad) return true;
+      // Recognize a short inflection suffix without matching profanity as an
+      // arbitrary substring inside normal words, code, or pasted source text.
+      return bad.length >= 4 && word.startsWith(bad) && word.length <= bad.length + 3;
+    });
+    if (matchesWholeWord) {
       return {
         flagged: true,
         reason: "Uygunsuz dil / küfür kullanımı",

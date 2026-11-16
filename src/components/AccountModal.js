@@ -33,9 +33,6 @@ export default function AccountModal({
 
   if (!isOpen || !firebaseUser || !userProfile) return null;
 
-  const dailyLimit = 100;
-  const usagePct = Math.min(100, Math.round((userProfile.dailyCount / dailyLimit) * 100));
-
   const handleSendVerification = async () => {
     setErr("");
     setMsg("");
@@ -137,30 +134,6 @@ export default function AccountModal({
                 </span>
               )}
             </div>
-          </div>
-
-          {/* Günlük Adil Kullanım Kotası */}
-          <div
-            className={`rounded-xl border p-3.5 ${
-              darkMode ? "border-zinc-800 bg-zinc-950" : "border-zinc-200 bg-zinc-50"
-            }`}
-          >
-            <div className="mb-1.5 flex justify-between font-medium">
-              <span>Günlük Adil Kullanım Kotası</span>
-              <span>
-                {userProfile.dailyCount} / {dailyLimit}
-              </span>
-            </div>
-            <div className={`h-2 w-full overflow-hidden rounded-full ${darkMode ? "bg-zinc-800/60" : "bg-zinc-300"}`}>
-              <div
-                className="h-full rounded-full bg-emerald-500 transition-all"
-                style={{ width: `${usagePct}%` }}
-              />
-            </div>
-            <p className="mt-1.5 text-[11px] opacity-55">
-              Spam koruması için günlük {dailyLimit} istek limiti uygulanır. Her gece 00:00&apos;da
-              sıfırlanır.
-            </p>
           </div>
 
           {/* Güvenlik Butonları */}

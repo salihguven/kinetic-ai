@@ -1,4 +1,5 @@
 // src/lib/aiAdapters.js
+import { buildReasoningOptions } from "./reasoning.js";
 
 // Provider endpoints are user-configurable; never follow a redirect to an unchecked host.
 const fetch = (input, init = {}) =>
@@ -13,6 +14,22 @@ async function safeParseJSON(res) {
       `API geçersiz yanıt döndürdü (HTTP ${res.status}). URL veya API Key hatalı olabilir.`
     );
   }
+}
+
+export function normalizeTokenUsage({ inputTokens, outputTokens, totalTokens } = {}) {
+  const toCount = (value) => {
+    if (value === undefined || value === null || value === "") return null;
+    const count = Number(value);
+    return Number.isSafeInteger(count) && count >= 0 && count <= 1_000_000_000
+      ? count
+      : null;
+  };
+  const input = toCount(inputTokens);
+  const output = toCount(outputTokens);
+  let total = toCount(totalTokens);
+  if (total === null && input !== null && output !== null) total = input + output;
+  if (input === null && output === null && total === null) return null;
+  return { inputTokens: input, outputTokens: output, totalTokens: total };
 }
 
 /**
@@ -60,7 +77,7 @@ export function classifyProviderError({ status, rawMessage = "", model = "" }) {
   return null;
 }
 
-export async function callAIProvider({ provider, messages, systemPrompt }) {
+export async function callAIProvider({ provider, messages, systemPrompt, reasoningLevel = "auto" }) {
   const { type, baseUrl, apiKey, model } = provider || {};
 
   if (!type) throw new Error("Sağlayıcı türü (type) eksik.");
@@ -87,11 +104,11 @@ export async function callAIProvider({ provider, messages, systemPrompt }) {
 
   switch (type) {
     case "gemini":
-      return await callGemini({ apiKey, model, messages, systemPrompt });
+      return await callGemini({ apiKey, model, messages, systemPrompt, reasoningLevel });
     case "openai-compatible":
-      return await callOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt });
+      return await callOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt, reasoningLevel });
     case "anthropic":
-      return await callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt });
+      return await callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, reasoningLevel });
     case "ollama":
       return await callOllama({ baseUrl, apiKey, model, messages, systemPrompt });
     case "custom":
@@ -106,25 +123,25 @@ export async function callAIProvider({ provider, messages, systemPrompt }) {
  * Hata, hiç parça gönderilmeden (ilk token'dan önce) oluşursa err._noOutput = true
  * işaretlenir, böylece çağıran taraf bunun fallback'e geçmesi gerektiğini anlar.
  */
-export async function streamAIProvider({ provider, messages, systemPrompt, onToken }) {
+export async function streamAIProvider({ provider, messages, systemPrompt, onToken, reasoningLevel = "auto" }) {
   const { type, baseUrl, apiKey, model } = provider || {};
   if (!type) throw new Error("Sağlayıcı türü (type) eksik.");
   if (!model && type !== "custom") throw new Error("Model adı belirtilmedi.");
 
   switch (type) {
     case "gemini":
-      return await streamGemini({ apiKey, model, messages, systemPrompt, onToken });
+      return await streamGemini({ apiKey, model, messages, systemPrompt, onToken, reasoningLevel });
     case "openai-compatible":
-      return await streamOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt, onToken });
+      return await streamOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt, onToken, reasoningLevel });
     case "anthropic":
-      return await streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, onToken });
+      return await streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, onToken, reasoningLevel });
     case "ollama":
       return await streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, onToken });
     case "custom": {
       // Özel endpoint gerçek streaming desteklemiyor; tek seferde al, tek parça gönder.
-      const full = await callCustomEndpoint({ baseUrl, apiKey, model, messages, systemPrompt });
-      onToken(full);
-      return full;
+      const result = await callCustomEndpoint({ baseUrl, apiKey, model, messages, systemPrompt });
+      onToken(result.reply);
+      return result;
     }
     default:
       throw new Error(`Desteklenmeyen sağlayıcı türü: ${type}`);
@@ -135,14 +152,14 @@ export async function streamAIProvider({ provider, messages, systemPrompt, onTok
 // GEMINI
 // ---------------------------------------------------------------------
 
-async function callGemini({ apiKey, model, messages, systemPrompt }) {
+async function callGemini({ apiKey, model, messages, systemPrompt, reasoningLevel }) {
   if (!apiKey) throw new Error("Gemini için API Key gerekli.");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const body = buildGeminiBody({ messages, systemPrompt });
+  const body = buildGeminiBody({ messages, systemPrompt, reasoningLevel, provider: { type: "gemini", model } });
 
   let res;
   try {
@@ -169,12 +186,21 @@ async function callGemini({ apiKey, model, messages, systemPrompt }) {
   const parts = data?.candidates?.[0]?.content?.parts || [];
   const reply = parts.map((p) => p.text || "").join("\n").trim();
   if (!reply) throw new Error("Gemini boş yanıt döndürdü.");
-  return reply;
+  const meta = data?.usageMetadata;
+  return {
+    reply,
+    usage: normalizeTokenUsage({
+      inputTokens: meta?.promptTokenCount,
+      outputTokens: meta?.candidatesTokenCount,
+      totalTokens: meta?.totalTokenCount,
+    }),
+  };
 }
 
-function buildGeminiBody({ messages, systemPrompt }) {
+function buildGeminiBody({ messages, systemPrompt, reasoningLevel = "auto", provider }) {
   return {
     ...(systemPrompt ? { systemInstruction: { parts: [{ text: systemPrompt }] } } : {}),
+    ...buildReasoningOptions(provider, reasoningLevel),
     contents: messages.map((m) => {
       const parts = [{ text: m.content || "Bu görseli açıkla." }];
       if (Array.isArray(m.images) && m.images.length > 0) {
@@ -189,14 +215,14 @@ function buildGeminiBody({ messages, systemPrompt }) {
   };
 }
 
-async function streamGemini({ apiKey, model, messages, systemPrompt, onToken }) {
+async function streamGemini({ apiKey, model, messages, systemPrompt, onToken, reasoningLevel }) {
   if (!apiKey) throw new Error("Gemini için API Key gerekli.");
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
   )}:streamGenerateContent?alt=sse&key=${encodeURIComponent(apiKey)}`;
 
-  const body = buildGeminiBody({ messages, systemPrompt });
+  const body = buildGeminiBody({ messages, systemPrompt, reasoningLevel, provider: { type: "gemini", model } });
 
   let res;
   try {
@@ -222,10 +248,19 @@ async function streamGemini({ apiKey, model, messages, systemPrompt, onToken }) 
 
   let full = "";
   let gotAny = false;
+  let usage = null;
 
   await readSSELines(res.body, (jsonStr) => {
     try {
       const obj = JSON.parse(jsonStr);
+      if (obj?.usageMetadata) {
+        const meta = obj.usageMetadata;
+        usage = normalizeTokenUsage({
+          inputTokens: meta.promptTokenCount,
+          outputTokens: meta.candidatesTokenCount,
+          totalTokens: meta.totalTokenCount,
+        }) || usage;
+      }
       const parts = obj?.candidates?.[0]?.content?.parts || [];
       const text = parts.map((p) => p.text || "").join("");
       if (text) {
@@ -243,7 +278,7 @@ async function streamGemini({ apiKey, model, messages, systemPrompt, onToken }) 
     e._noOutput = true;
     throw e;
   }
-  return full;
+  return { reply: full, usage };
 }
 
 // ---------------------------------------------------------------------
@@ -271,7 +306,7 @@ function buildOpenAIMessages({ messages, systemPrompt }) {
   ];
 }
 
-async function callOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt }) {
+async function callOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt, reasoningLevel }) {
   if (!apiKey && (baseUrl || "").includes("groq.com")) {
     throw new Error("Groq için API Key girmelisin.");
   }
@@ -289,7 +324,11 @@ async function callOpenAICompatible({ baseUrl, apiKey, model, messages, systemPr
     res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model, messages: formattedMessages }),
+      body: JSON.stringify({
+        model,
+        messages: formattedMessages,
+        ...buildReasoningOptions({ type: "openai-compatible", baseUrl: cleanBase, model }, reasoningLevel),
+      }),
       signal: AbortSignal.timeout(12000),
     });
   } catch (err) {
@@ -305,10 +344,18 @@ async function callOpenAICompatible({ baseUrl, apiKey, model, messages, systemPr
   }
   const reply = data?.choices?.[0]?.message?.content;
   if (!reply) throw new Error("Modelden boş yanıt döndü.");
-  return reply;
+  const providerUsage = data?.usage;
+  return {
+    reply,
+    usage: normalizeTokenUsage({
+      inputTokens: providerUsage?.prompt_tokens ?? providerUsage?.input_tokens,
+      outputTokens: providerUsage?.completion_tokens ?? providerUsage?.output_tokens,
+      totalTokens: providerUsage?.total_tokens,
+    }),
+  };
 }
 
-async function streamOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt, onToken }) {
+async function streamOpenAICompatible({ baseUrl, apiKey, model, messages, systemPrompt, onToken, reasoningLevel }) {
   if (!apiKey && (baseUrl || "").includes("groq.com")) {
     const e = new Error("Groq için API Key girmelisin.");
     e._noOutput = true;
@@ -317,6 +364,9 @@ async function streamOpenAICompatible({ baseUrl, apiKey, model, messages, system
 
   const cleanBase = (baseUrl || "https://api.openai.com/v1").replace(/\/+$/, "");
   const url = cleanBase.endsWith("/chat/completions") ? cleanBase : `${cleanBase}/chat/completions`;
+  const host = new URL(cleanBase).hostname.toLowerCase();
+  const supportsStreamUsage = host === "api.openai.com" || host === "api.groq.com" ||
+    host === "openrouter.ai" || host.endsWith(".openrouter.ai");
   const headers = {
     "Content-Type": "application/json",
     ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
@@ -328,7 +378,13 @@ async function streamOpenAICompatible({ baseUrl, apiKey, model, messages, system
     res = await fetch(url, {
       method: "POST",
       headers,
-      body: JSON.stringify({ model, messages: formattedMessages, stream: true }),
+      body: JSON.stringify({
+        model,
+        messages: formattedMessages,
+        stream: true,
+        ...buildReasoningOptions({ type: "openai-compatible", baseUrl: cleanBase, model }, reasoningLevel),
+        ...(supportsStreamUsage ? { stream_options: { include_usage: true } } : {}),
+      }),
       signal: AbortSignal.timeout(30000),
     });
   } catch (err) {
@@ -347,11 +403,19 @@ async function streamOpenAICompatible({ baseUrl, apiKey, model, messages, system
 
   let full = "";
   let gotAny = false;
+  let usage = null;
 
   await readSSELines(res.body, (jsonStr) => {
     if (jsonStr === "[DONE]") return;
     try {
       const obj = JSON.parse(jsonStr);
+      if (obj?.usage) {
+        usage = normalizeTokenUsage({
+          inputTokens: obj.usage.prompt_tokens ?? obj.usage.input_tokens,
+          outputTokens: obj.usage.completion_tokens ?? obj.usage.output_tokens,
+          totalTokens: obj.usage.total_tokens,
+        }) || usage;
+      }
       const delta = obj?.choices?.[0]?.delta?.content;
       if (delta) {
         gotAny = true;
@@ -368,7 +432,7 @@ async function streamOpenAICompatible({ baseUrl, apiKey, model, messages, system
     e._noOutput = true;
     throw e;
   }
-  return full;
+  return { reply: full, usage };
 }
 
 // ---------------------------------------------------------------------
@@ -393,7 +457,7 @@ function buildAnthropicMessages({ messages }) {
   });
 }
 
-async function callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt }) {
+async function callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, reasoningLevel }) {
   if (!apiKey) throw new Error("Claude için API Key gerekli.");
   const cleanBase = (baseUrl || "https://api.anthropic.com/v1").replace(/\/+$/, "");
   const url = cleanBase.endsWith("/messages") ? cleanBase : `${cleanBase}/messages`;
@@ -409,6 +473,7 @@ async function callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt })
       model,
       max_tokens: 2048,
       ...(systemPrompt ? { system: systemPrompt } : {}),
+      ...buildReasoningOptions({ type: "anthropic", baseUrl: cleanBase, model }, reasoningLevel),
       messages: buildAnthropicMessages({ messages }),
     }),
     signal: AbortSignal.timeout(15000),
@@ -420,12 +485,23 @@ async function callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt })
     err._status = res.status;
     throw err;
   }
-  const reply = data?.content?.[0]?.text;
+  const reply = data?.content?.find((block) => block?.type === "text")?.text;
   if (!reply) throw new Error("Anthropic'ten boş yanıt döndü.");
-  return reply;
+  const inputTokens = data?.usage?.input_tokens;
+  const outputTokens = data?.usage?.output_tokens;
+  return {
+    reply,
+    usage: normalizeTokenUsage({
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens != null && outputTokens != null
+        ? Number(inputTokens) + Number(outputTokens)
+        : null,
+    }),
+  };
 }
 
-async function streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, onToken }) {
+async function streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, onToken, reasoningLevel }) {
   if (!apiKey) {
     const e = new Error("Claude için API Key gerekli.");
     e._noOutput = true;
@@ -448,6 +524,7 @@ async function streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt,
         max_tokens: 2048,
         stream: true,
         ...(systemPrompt ? { system: systemPrompt } : {}),
+        ...buildReasoningOptions({ type: "anthropic", baseUrl: cleanBase, model }, reasoningLevel),
         messages: buildAnthropicMessages({ messages }),
       }),
       signal: AbortSignal.timeout(30000),
@@ -468,10 +545,18 @@ async function streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt,
 
   let full = "";
   let gotAny = false;
+  let inputTokens = null;
+  let outputTokens = null;
 
   await readSSELines(res.body, (jsonStr) => {
     try {
       const obj = JSON.parse(jsonStr);
+      if (obj.type === "message_start" && obj.message?.usage?.input_tokens != null) {
+        inputTokens = obj.message.usage.input_tokens;
+      }
+      if (obj.type === "message_delta" && obj.usage?.output_tokens != null) {
+        outputTokens = obj.usage.output_tokens;
+      }
       if (obj.type === "content_block_delta" && obj.delta?.text) {
         gotAny = true;
         full += obj.delta.text;
@@ -487,7 +572,16 @@ async function streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt,
     e._noOutput = true;
     throw e;
   }
-  return full;
+  return {
+    reply: full,
+    usage: normalizeTokenUsage({
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens != null && outputTokens != null
+        ? Number(inputTokens) + Number(outputTokens)
+        : null,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -526,7 +620,16 @@ async function callOllama({ baseUrl, apiKey, model, messages, systemPrompt }) {
   if (!res.ok) throw new Error(data?.error || "Ollama sunucusuna bağlanılamadı.");
   const reply = data?.message?.content;
   if (!reply) throw new Error("Ollama'dan boş yanıt döndü.");
-  return reply;
+  return {
+    reply,
+    usage: normalizeTokenUsage({
+      inputTokens: data?.prompt_eval_count,
+      outputTokens: data?.eval_count,
+      totalTokens: data?.prompt_eval_count != null && data?.eval_count != null
+        ? Number(data.prompt_eval_count) + Number(data.eval_count)
+        : null,
+    }),
+  };
 }
 
 async function streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, onToken }) {
@@ -563,6 +666,8 @@ async function streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, on
 
   let full = "";
   let gotAny = false;
+  let inputTokens = null;
+  let outputTokens = null;
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
@@ -577,6 +682,8 @@ async function streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, on
       if (!line.trim()) continue;
       try {
         const obj = JSON.parse(line);
+        if (obj.prompt_eval_count != null) inputTokens = obj.prompt_eval_count;
+        if (obj.eval_count != null) outputTokens = obj.eval_count;
         const text = obj?.message?.content;
         if (text) {
           gotAny = true;
@@ -589,12 +696,37 @@ async function streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, on
     }
   }
 
+  if (buffer.trim()) {
+    try {
+      const obj = JSON.parse(buffer);
+      if (obj.prompt_eval_count != null) inputTokens = obj.prompt_eval_count;
+      if (obj.eval_count != null) outputTokens = obj.eval_count;
+      const text = obj?.message?.content;
+      if (text) {
+        gotAny = true;
+        full += text;
+        onToken(text);
+      }
+    } catch {
+      // Incomplete trailing stream frame.
+    }
+  }
+
   if (!gotAny) {
     const e = new Error("Ollama'dan boş yanıt döndü.");
     e._noOutput = true;
     throw e;
   }
-  return full;
+  return {
+    reply: full,
+    usage: normalizeTokenUsage({
+      inputTokens,
+      outputTokens,
+      totalTokens: inputTokens !== null && outputTokens !== null
+        ? Number(inputTokens) + Number(outputTokens)
+        : null,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------
@@ -624,7 +756,15 @@ async function callCustomEndpoint({ baseUrl, apiKey, model, messages, systemProm
   const reply =
     data?.reply || data?.response || data?.text || data?.output || data?.choices?.[0]?.message?.content;
   if (!reply) throw new Error("Özel AI yanıtı okunamadı.");
-  return reply;
+  const providerUsage = data?.usage;
+  return {
+    reply,
+    usage: normalizeTokenUsage({
+      inputTokens: providerUsage?.prompt_tokens ?? providerUsage?.input_tokens ?? providerUsage?.promptTokenCount,
+      outputTokens: providerUsage?.completion_tokens ?? providerUsage?.output_tokens ?? providerUsage?.candidatesTokenCount,
+      totalTokens: providerUsage?.total_tokens ?? providerUsage?.totalTokenCount,
+    }),
+  };
 }
 
 // ---------------------------------------------------------------------

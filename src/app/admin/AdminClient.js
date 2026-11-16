@@ -5,6 +5,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { getApps, initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
+import { Ban, Download, ShieldCheck } from "lucide-react";
+import { readApiJson } from "@/lib/apiResponse";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -14,6 +16,11 @@ const firebaseConfig = {
 };
 
 function getFirebaseAuth() {
+  const requiredConfig = ["apiKey", "authDomain", "projectId", "appId"];
+  const missingConfig = requiredConfig.filter((key) => !String(firebaseConfig[key] || "").trim());
+  if (missingConfig.length > 0) {
+    throw new Error(`Admin panel Firebase web ayarları eksik: ${missingConfig.join(", ")}. .env.local dosyasını doldurup geliştirme sunucusunu yeniden başlatın.`);
+  }
   const app = getApps()[0] || initializeApp(firebaseConfig);
   return getAuth(app);
 }
@@ -38,10 +45,15 @@ export default function AdminClient() {
   const [user, setUser] = useState(null);
   const [activeTab, setActiveTab] = useState("dashboard");
   const [users, setUsers] = useState([]);
+  const [usersPageToken, setUsersPageToken] = useState("");
+  const [nextUsersPageToken, setNextUsersPageToken] = useState("");
+  const [usersPageHistory, setUsersPageHistory] = useState([]);
   const [updates, setUpdates] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
+  const [usersError, setUsersError] = useState("");
+  const [usersWarning, setUsersWarning] = useState("");
   const [success, setSuccess] = useState("");
   const [search, setSearch] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -55,55 +67,81 @@ export default function AdminClient() {
   });
 
   const [accessDenied, setAccessDenied] = useState(false);
+  const [isFounder, setIsFounder] = useState(false);
+  const [banActionUid, setBanActionUid] = useState("");
+  const [exportingUsers, setExportingUsers] = useState(false);
 
-  const loadDashboard = useCallback(async (firebaseUser, showRefresh = false) => {
+  const loadDashboard = useCallback(async (firebaseUser, showRefresh = false, requestedPageToken = "") => {
     if (showRefresh) setRefreshing(true);
     else setLoading(true);
 
     setError("");
+    setUsersError("");
+    setUsersWarning("");
     setSuccess("");
 
     try {
-      const token = await firebaseUser.getIdToken();
+      // Custom claims update after token refresh; force renewal so newly
+      // promoted admins can open the panel immediately after signing in.
+      const token = await firebaseUser.getIdToken(true);
 
       const accessResponse = await fetch("/api/admin/access", {
         headers: { Authorization: `Bearer ${token}` },
         cache: "no-store",
       });
 
-      const accessData = await accessResponse.json();
+      const accessData = await readApiJson(accessResponse, "Admin erişim kontrolü");
 
-      if (!accessResponse.ok || accessData.isAdmin !== true) {
+      if (accessResponse.status === 401 || accessResponse.status === 403) {
+        setAccessDenied(true);
+        return;
+      }
+      if (!accessResponse.ok) {
+        throw new Error(accessData.error || `Admin erişim kontrolü başarısız (HTTP ${accessResponse.status}).`);
+      }
+      if (accessData.isAdmin !== true) {
         setAccessDenied(true);
         return;
       }
 
       setAccessDenied(false);
+      setIsFounder(accessData.isFounder === true);
 
-      const [usersResponse, updatesResponse] = await Promise.all([
-        fetch("/api/admin/users?limit=100", {
+      const usersParams = new URLSearchParams({ limit: "100" });
+      if (requestedPageToken) usersParams.set("pageToken", requestedPageToken);
+      const [usersResult, updatesResult] = await Promise.allSettled([
+        fetch(`/api/admin/users?${usersParams.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
-        }),
+        }).then(async (response) => ({ response, data: await readApiJson(response, "Kullanıcı listesi") })),
         fetch("/api/admin/updates", {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
-        }),
+        }).then(async (response) => ({ response, data: await readApiJson(response, "Güncelleme listesi") })),
       ]);
 
-      const usersData = await usersResponse.json();
-      const updatesData = await updatesResponse.json();
-
-      if (!usersResponse.ok) {
-        throw new Error(usersData.error || "Kullanıcılar yüklenemedi.");
+      if (usersResult.status === "fulfilled" && usersResult.value.response.ok && Array.isArray(usersResult.value.data.users)) {
+        setUsers(usersResult.value.data.users);
+        setUsersPageToken(requestedPageToken);
+        setNextUsersPageToken(usersResult.value.data.nextPageToken || "");
+        setUsersWarning(usersResult.value.data.profileDataAvailable === false
+          ? usersResult.value.data.profileDataError || "Firestore kullanıcı profilleri okunamadı. KineticAI yasak durumu bilinmediği için yasaklama kontrolleri kapatıldı."
+          : "");
+      } else {
+        const message = usersResult.status === "rejected"
+          ? usersResult.reason?.message
+          : usersResult.value.data.error || `Kullanıcılar yüklenemedi (HTTP ${usersResult.value.response.status}).`;
+        setUsersError(message || "Kullanıcı listesi alınamadı. Firebase Authentication ve servis hesabını kontrol edin.");
       }
 
-      if (!updatesResponse.ok) {
-        throw new Error(updatesData.error || "Güncellemeler yüklenemedi.");
+      if (updatesResult.status === "fulfilled" && updatesResult.value.response.ok && Array.isArray(updatesResult.value.data.updates)) {
+        setUpdates(updatesResult.value.data.updates);
+      } else {
+        const message = updatesResult.status === "rejected"
+          ? updatesResult.reason?.message
+          : updatesResult.value.data.error || `Güncellemeler yüklenemedi (HTTP ${updatesResult.value.response.status}).`;
+        setError(message || "Güncelleme listesi alınamadı.");
       }
-
-      setUsers(usersData.users || []);
-      setUpdates(updatesData.updates || []);
     } catch (err) {
       setError(err.message || "Bir bağlantı hatası oluştu.");
     } finally {
@@ -113,19 +151,27 @@ export default function AdminClient() {
   }, []);
 
   useEffect(() => {
-    const auth = getFirebaseAuth();
+    let unsubscribe = () => {};
+    try {
+      const auth = getFirebaseAuth();
+      unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+        setUser(firebaseUser);
 
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
+        if (!firebaseUser) {
+          setLoading(false);
+          setAccessDenied(true);
+          return;
+        }
 
-      if (!firebaseUser) {
+        loadDashboard(firebaseUser);
+      });
+    } catch (authError) {
+      window.setTimeout(() => {
+        setError(authError.message || "Firebase web ayarları okunamadı.");
         setLoading(false);
         setAccessDenied(true);
-        return;
-      }
-
-      loadDashboard(firebaseUser);
-    });
+      }, 0);
+    }
 
     return () => unsubscribe();
   }, [loadDashboard]);
@@ -148,11 +194,138 @@ export default function AdminClient() {
 
   const stats = useMemo(() => ({
     total: users.length,
-    admins: users.filter((u) => u.role === "admin").length,
+    admins: users.filter((u) => u.role === "admin" || u.role === "founder").length,
+    founders: users.filter((u) => u.role === "founder").length,
     testers: users.filter((u) => u.role === "tester").length,
     verified: users.filter((u) => u.emailVerified).length,
     disabled: users.filter((u) => u.disabled).length,
+    banned: users.filter((u) => u.banned).length,
   }), [users]);
+
+  async function toggleUserBan(item) {
+    if (!user || banActionUid) return;
+    if (item.banStatusAvailable === false) {
+      setError("Bu kullanıcının Firestore yasak durumu okunamadı. Yasaklama işlemi için önce veritabanı bağlantısını düzeltin.");
+      return;
+    }
+    const nextBanned = !item.banned;
+    const reason = nextBanned
+      ? window.prompt("Yasaklama nedeni (en fazla 300 karakter):", "Topluluk kurallarının ihlali.")
+      : "";
+    if (nextBanned && reason === null) return;
+    if (nextBanned && !reason.trim()) {
+      setError("Yasaklama nedeni boş bırakılamaz.");
+      return;
+    }
+    if (reason.length > 300) {
+      setError("Yasaklama nedeni 300 karakteri aşamaz.");
+      return;
+    }
+    const prompt = nextBanned
+      ? `${item.email || item.uid} hesabını KineticAI kullanımından yasaklamak istiyor musunuz?\n\nNeden: ${reason}`
+      : `${item.email || item.uid} hesabının yasağını kaldırmak istiyor musunuz?`;
+    if (!window.confirm(prompt)) return;
+
+    setBanActionUid(item.uid);
+    setError("");
+    setSuccess("");
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/admin/users/ban", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          uid: item.uid,
+          banned: nextBanned,
+          reason,
+        }),
+      });
+      const data = await readApiJson(response, "Kullanıcı durumu");
+      if (!response.ok || data.success !== true) {
+        throw new Error(data.error || `Kullanıcı durumu değiştirilemedi (HTTP ${response.status}).`);
+      }
+
+      await loadDashboard(user, true, usersPageToken);
+      setSuccess(nextBanned ? "Kullanıcı yasaklandı." : "Kullanıcı yasağı kaldırıldı.");
+    } catch (err) {
+      setError(err.message || "Kullanıcı durumu değiştirilemedi.");
+    } finally {
+      setBanActionUid("");
+    }
+  }
+
+  async function downloadFilteredUsers() {
+    if (!user || exportingUsers || users.length === 0) return;
+    setExportingUsers(true);
+    setError("");
+    try {
+      const token = await user.getIdToken();
+      const allUsers = [];
+      let pageToken = "";
+      do {
+        const params = new URLSearchParams({ limit: "100" });
+        if (pageToken) params.set("pageToken", pageToken);
+        const response = await fetch(`/api/admin/users?${params.toString()}`, {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        });
+        const data = await readApiJson(response, "Kullanıcı dışa aktarma");
+        if (!response.ok || !Array.isArray(data.users)) {
+          throw new Error(data.error || `Kullanıcı sayfası alınamadı (HTTP ${response.status}).`);
+        }
+        allUsers.push(...data.users);
+        pageToken = data.nextPageToken || "";
+      } while (pageToken);
+
+      const query = search.trim().toLowerCase();
+      const exportUsers = allUsers.filter((item) => {
+        const matchesSearch = !query ||
+          (item.email || "").toLowerCase().includes(query) ||
+          (item.displayName || "").toLowerCase().includes(query) ||
+          (item.uid || "").toLowerCase().includes(query);
+        const matchesRole = roleFilter === "all" || item.role === roleFilter;
+        return matchesSearch && matchesRole;
+      });
+      if (exportUsers.length === 0) {
+        setError("Seçili arama ve role uygun kullanıcı bulunamadı.");
+        return;
+      }
+
+      const headers = ["UID", "E-posta", "Ad", "Rol", "E-posta doğrulandı", "Firebase devre dışı", "KineticAI yasaklı", "Yasak nedeni", "Kayıt tarihi", "Son giriş"];
+      const protectFormula = (value) => {
+        const text = String(value ?? "");
+        return /^[\s\u0000-\u001f]*[=+@-]/.test(text) ? `'${text}` : text;
+      };
+      const cell = (value) => `"${protectFormula(value).replace(/"/g, '""')}"`;
+      const rows = exportUsers.map((item) => [
+        item.uid,
+        item.email,
+        item.displayName,
+        item.role,
+        item.emailVerified ? "Evet" : "Hayır",
+        item.disabled ? "Evet" : "Hayır",
+        item.banned === null ? "Bilinmiyor" : item.banned ? "Evet" : "Hayır",
+        item.banReason,
+        item.creationTime,
+        item.lastSignInTime,
+      ]);
+      const csv = `\uFEFF${[headers, ...rows].map((row) => row.map(cell).join(",")).join("\r\n")}`;
+      const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `kineticai-users-${new Date().toISOString().slice(0, 10)}.csv`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setSuccess(`${exportUsers.length} kullanıcı kaydı CSV olarak indirildi.`);
+    } catch (err) {
+      setError(err.message || "Kullanıcı verileri indirilemedi.");
+    } finally {
+      setExportingUsers(false);
+    }
+  }
 
   async function publishUpdate(event) {
     event.preventDefault();
@@ -175,7 +348,7 @@ export default function AdminClient() {
         body: JSON.stringify(form),
       });
 
-      const data = await response.json();
+      const data = await readApiJson(response, "Güncelleme yayını");
 
       if (!response.ok) {
         throw new Error(data.error || "Güncelleme yayınlanamadı.");
@@ -214,9 +387,9 @@ export default function AdminClient() {
             {user ? "Erişim reddedildi" : "Giriş gerekli"}
           </h1>
           <p className="text-gray-400 text-sm leading-6">
-            {user
+            {error || (user
               ? "Bu alana erişmek için doğrulanmış Admin yetkisi gerekiyor."
-              : "Admin panelini kullanmak için hesabına giriş yapmalısın."}
+              : "Admin panelini kullanmak için hesabına giriş yapmalısın.")}
           </p>
           <Link href="/" className="inline-flex mt-7 px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 transition font-semibold">
             Ana sayfaya dön
@@ -307,7 +480,7 @@ export default function AdminClient() {
             </div>
             <div className="min-w-0">
               <p className="text-xs font-semibold truncate">{user.email}</p>
-              <p className="text-[10px] text-violet-400 mt-1">SUPER ADMIN</p>
+              <p className="text-[10px] text-violet-400 mt-1">{isFounder ? "KURUCU" : "ADMIN"}</p>
             </div>
           </div>
         </div>
@@ -337,7 +510,7 @@ export default function AdminClient() {
             </div>
 
             <button
-              onClick={() => loadDashboard(user, true)}
+              onClick={() => loadDashboard(user, true, usersPageToken)}
               disabled={refreshing}
               className="h-10 px-4 rounded-xl border border-white/10 bg-white/[0.04] hover:bg-white/[0.08] text-sm transition disabled:opacity-50"
             >
@@ -401,11 +574,13 @@ export default function AdminClient() {
                   <span className="text-[10px] text-gray-600">İlk 100 hesap</span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6 gap-4">
                   <StatCard label="Toplam kullanıcı" value={stats.total} icon="♙" color="violet" detail="Yüklenen hesaplar" />
                   <StatCard label="E-posta onaylı" value={stats.verified} icon="✓" color="emerald" detail="Doğrulanmış hesaplar" />
+                  <StatCard label="Yönetici" value={stats.admins} icon="◇" color="blue" detail={`${stats.founders} kurucu`} />
                   <StatCard label="Tester hesapları" value={stats.testers} icon="⌘" color="blue" detail="Tester yetkisi olanlar" />
                   <StatCard label="Devre dışı hesaplar" value={stats.disabled} icon="⊘" color="amber" detail="Kapalı hesaplar" />
+                  <StatCard label="KineticAI yasağı" value={stats.banned} icon="⊗" color="amber" detail="Yasaklı hesaplar" />
                 </div>
               </section>
 
@@ -445,7 +620,9 @@ export default function AdminClient() {
 
                   <div className="space-y-5">
                     <SummaryRow label="Yönetici" value={stats.admins} color="violet" />
+                    <SummaryRow label="Kurucu" value={stats.founders} color="blue" />
                     <SummaryRow label="Tester" value={stats.testers} color="blue" />
+                    <SummaryRow label="Yasaklı kullanıcı" value={stats.banned} color="amber" />
                     <SummaryRow label="Normal kullanıcı" value={users.filter((u) => u.role === "user").length} color="gray" />
                     <SummaryRow label="Güncellemeler" value={updates.length} color="emerald" />
                   </div>
@@ -502,15 +679,41 @@ export default function AdminClient() {
                     Kayıtlı hesapları incele ve yetki durumlarını görüntüle.
                   </p>
                 </div>
-                <div className="text-xs text-gray-500">
-                  {filteredUsers.length} kullanıcı gösteriliyor
+                <div className="flex flex-wrap items-center gap-3">
+                  <span className="text-xs text-gray-500">
+                    {filteredUsers.length} kullanıcı gösteriliyor
+                  </span>
+                  <button
+                    type="button"
+                    onClick={downloadFilteredUsers}
+                    disabled={users.length === 0 || exportingUsers}
+                    className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-4 text-sm transition hover:bg-white/[0.08] disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Download size={15} aria-hidden="true" />
+                    {exportingUsers ? "Hazırlanıyor…" : "CSV indir"}
+                  </button>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+              {usersError && (
+                <div role="alert" className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 text-sm text-amber-200">
+                  <span>{usersError}</span>
+                  <button type="button" onClick={() => loadDashboard(user, true, usersPageToken)} className="min-h-10 rounded-lg border border-white/10 px-3 text-xs font-semibold hover:bg-white/[0.05]">Yeniden dene</button>
+                </div>
+              )}
+
+              {usersWarning && (
+                <div role="status" className="rounded-xl border border-amber-500/20 bg-amber-500/[0.06] p-4 text-sm leading-relaxed text-amber-200">
+                  {usersWarning}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 xl:grid-cols-5 gap-3">
                 <MiniStat label="Toplam" value={stats.total} />
                 <MiniStat label="Admin" value={stats.admins} />
+                <MiniStat label="Kurucu" value={stats.founders} />
                 <MiniStat label="Tester" value={stats.testers} />
+                <MiniStat label="Yasaklı" value={usersWarning ? "—" : stats.banned} />
                 <MiniStat label="Onaylı e-posta" value={stats.verified} />
               </div>
 
@@ -526,20 +729,23 @@ export default function AdminClient() {
                     />
                   </div>
 
-                  <select
-                    value={roleFilter}
-                    onChange={(e) => setRoleFilter(e.target.value)}
-                    className="h-11 rounded-xl bg-[#080a12] border border-white/[0.07] px-4 text-sm text-gray-300 outline-none"
-                  >
-                    <option value="all">Tüm roller</option>
-                    <option value="admin">Admin</option>
-                    <option value="tester">Tester</option>
-                    <option value="user">User</option>
-                  </select>
+                  <div className="flex flex-col sm:flex-row gap-3">
+                    <select
+                      value={roleFilter}
+                      onChange={(e) => setRoleFilter(e.target.value)}
+                      className="h-11 rounded-xl bg-[#080a12] border border-white/[0.07] px-4 text-sm text-gray-300 outline-none"
+                    >
+                      <option value="all">Tüm roller</option>
+                      <option value="founder">Kurucu</option>
+                      <option value="admin">Admin</option>
+                      <option value="tester">Tester</option>
+                      <option value="user">User</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="overflow-x-auto">
-                  <table className="w-full text-left min-w-[750px]">
+                  <table className="w-full text-left min-w-[980px]">
                     <thead className="bg-white/[0.025] text-[10px] uppercase tracking-wider text-gray-500">
                       <tr>
                         <th className="px-6 py-4">Kullanıcı</th>
@@ -548,6 +754,7 @@ export default function AdminClient() {
                         <th className="px-6 py-4">E-posta</th>
                         <th className="px-6 py-4">Son giriş</th>
                         <th className="px-6 py-4">Durum</th>
+                        <th className="px-6 py-4">İşlem</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/[0.04]">
@@ -575,24 +782,108 @@ export default function AdminClient() {
                             {formatDate(item.lastSignInTime)}
                           </td>
                           <td className="px-6 py-4">
-                            <StatusBadge disabled={item.disabled} />
+                            <div className="flex flex-col items-start gap-1.5">
+                              <StatusBadge disabled={item.disabled} />
+                              <span className={`inline-flex items-center gap-1.5 text-[11px] ${item.banStatusAvailable === false ? "text-amber-300" : item.banned ? "text-red-300" : "text-gray-500"}`}>
+                                <span className={`w-1.5 h-1.5 rounded-full ${item.banStatusAvailable === false ? "bg-amber-400" : item.banned ? "bg-red-400" : "bg-gray-600"}`} />
+                                {item.banStatusAvailable === false ? "Yasak durumu bilinmiyor" : item.banned ? "KineticAI yasaklı" : "KineticAI erişimi açık"}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            {(() => {
+                              const privilegedTarget = item.role === "admin" || item.role === "founder";
+                              const cannotManage = item.uid === user?.uid || (privilegedTarget && !isFounder);
+                              const banStatusUnavailable = item.banStatusAvailable === false;
+                              const isBusy = banActionUid === item.uid;
+                              return (
+                                <button
+                                  type="button"
+                                  onClick={() => toggleUserBan(item)}
+                                  disabled={cannotManage || banStatusUnavailable || Boolean(banActionUid)}
+                                  title={banStatusUnavailable ? "Firestore yasak durumu okunamadı" : cannotManage ? (item.uid === user?.uid ? "Kendi hesabınızda bu işlem yapılamaz" : "Yönetici hesaplarını yalnızca kurucu yönetebilir") : undefined}
+                                  className={`inline-flex min-w-[135px] items-center justify-center gap-2 rounded-lg border px-3 py-2 text-xs font-medium transition disabled:cursor-not-allowed disabled:opacity-40 ${item.banned ? "border-emerald-500/20 bg-emerald-500/[0.06] text-emerald-300 hover:bg-emerald-500/10" : "border-red-500/20 bg-red-500/[0.06] text-red-300 hover:bg-red-500/10"}`}
+                                >
+                                  {item.banned ? <ShieldCheck size={14} aria-hidden="true" /> : <Ban size={14} aria-hidden="true" />}
+                                  {isBusy ? "İşleniyor…" : banStatusUnavailable ? "Durum alınamadı" : item.banned ? "Yasağı kaldır" : "Yasakla"}
+                                </button>
+                              );
+                            })()}
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
 
-                  {filteredUsers.length === 0 && (
+                  {users.length === 0 && (
                     <div className="p-12 text-center">
-                      <div className="text-3xl text-gray-600 mb-3">⌕</div>
+                      {loading || refreshing ? (
+                        <>
+                          <div className="mx-auto mb-3 h-6 w-6 animate-spin rounded-full border-2 border-violet-400 border-t-transparent" />
+                          <p role="status" className="text-sm text-gray-400">Firebase kullanıcıları yükleniyor…</p>
+                        </>
+                      ) : usersError ? (
+                        <>
+                          <div className="mb-3 text-3xl text-amber-300">!</div>
+                          <p className="text-sm text-gray-300">Kullanıcı verisi alınamadı.</p>
+                          <p className="mx-auto mt-2 max-w-lg text-xs leading-5 text-gray-500">{usersError}</p>
+                          <button
+                            type="button"
+                            onClick={() => loadDashboard(user, true, usersPageToken)}
+                            className="mt-4 min-h-11 rounded-xl border border-white/10 px-4 text-xs font-semibold hover:bg-white/[0.05]"
+                          >
+                            Yeniden dene
+                          </button>
+                        </>
+                      ) : search || roleFilter !== "all" ? (
+                        <>
+                          <div className="mb-3 text-3xl text-gray-600">⌕</div>
+                          <p className="text-sm text-gray-400">Aramana uygun kullanıcı bulunamadı.</p>
+                        </>
+                      ) : (
+                        <>
+                          <div className="mb-3 text-3xl text-gray-600">♙</div>
+                          <p className="text-sm text-gray-400">Firebase Authentication&apos;da henüz kullanıcı yok.</p>
+                        </>
+                      )}
+                    </div>
+                  )}
+                  {users.length > 0 && filteredUsers.length === 0 && (
+                    <div className="p-12 text-center">
+                      <div className="mb-3 text-3xl text-gray-600">⌕</div>
                       <p className="text-sm text-gray-400">Aramana uygun kullanıcı bulunamadı.</p>
                     </div>
                   )}
                 </div>
               </div>
 
+              {(usersPageHistory.length > 0 || nextUsersPageToken) && (
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={loading || refreshing || usersPageHistory.length === 0}
+                    onClick={() => {
+                      const previousToken = usersPageHistory[usersPageHistory.length - 1] || "";
+                      setUsersPageHistory((history) => history.slice(0, -1));
+                      loadDashboard(user, true, previousToken);
+                    }}
+                    className="min-h-10 rounded-xl border border-white/10 px-4 text-xs font-medium disabled:opacity-40"
+                  >Önceki 100</button>
+                  <span className="text-xs text-gray-500">{usersPageHistory.length + 1}. sayfa · {users.length} hesap</span>
+                  <button
+                    type="button"
+                    disabled={loading || refreshing || !nextUsersPageToken}
+                    onClick={() => {
+                      setUsersPageHistory((history) => [...history, usersPageToken]);
+                      loadDashboard(user, true, nextUsersPageToken);
+                    }}
+                    className="min-h-10 rounded-xl border border-white/10 px-4 text-xs font-medium disabled:opacity-40"
+                  >Sonraki 100</button>
+                </div>
+              )}
+
               <p className="text-xs text-gray-600">
-                Kullanıcı listesi şu anda API&apos;nin döndürdüğü ilk 100 hesabı gösterir. Bu ekranda henüz hesap değiştirme veya silme işlemi yapılmaz.
+                Her sayfada 100 Firebase Authentication hesabı görüntülenir. CSV, arama ve rol filtresine uyan tüm hesap kayıtlarını sayfalar halinde indirir. KineticAI yasağı uygulama erişimini engeller; Firebase hesabını veya kota kayıtlarını silmez.
               </p>
             </div>
           )}
@@ -798,6 +1089,7 @@ function Avatar({ name }) {
 
 function RoleBadge({ role }) {
   const styles = {
+    founder: "bg-amber-500/10 text-amber-300 border-amber-500/20",
     admin: "bg-violet-500/10 text-violet-300 border-violet-500/20",
     tester: "bg-blue-500/10 text-blue-300 border-blue-500/20",
     user: "bg-white/[0.05] text-gray-400 border-white/[0.08]",

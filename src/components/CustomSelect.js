@@ -1,7 +1,8 @@
 // src/components/CustomSelect.js
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { ChevronDown, Check, Search } from "lucide-react";
 
 export default function CustomSelect({
@@ -11,17 +12,27 @@ export default function CustomSelect({
   placeholder = "Seçiniz...",
   darkMode = true,
   searchable = null,
+  placement = "auto",
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const [menuPosition, setMenuPosition] = useState(null);
   const wrapperRef = useRef(null);
+  const menuRef = useRef(null);
 
   const showSearch = searchable !== null ? searchable : options.length > 6;
   const selectedOption = options.find((o) => String(o.value) === String(value));
+  const filtered = query.trim()
+    ? options.filter((o) =>
+        `${o.label} ${o.sublabel || ""}`
+          .toLowerCase()
+          .includes(query.trim().toLowerCase())
+      )
+    : options;
 
   useEffect(() => {
     const handleOutside = (e) => {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+      if (!wrapperRef.current?.contains(e.target) && !menuRef.current?.contains(e.target)) {
         setOpen(false);
       }
     };
@@ -36,18 +47,58 @@ export default function CustomSelect({
     };
   }, []);
 
-  const filtered = query.trim()
-    ? options.filter((o) =>
-        `${o.label} ${o.sublabel || ""}`
-          .toLowerCase()
-          .includes(query.trim().toLowerCase())
-      )
-    : options;
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+
+    const updatePosition = () => {
+      const anchor = wrapperRef.current?.getBoundingClientRect();
+      if (!anchor) return;
+
+      const gap = 6;
+      const sidePadding = 8;
+      const availableAbove = Math.max(96, anchor.top - sidePadding - gap);
+      const availableBelow = Math.max(96, window.innerHeight - anchor.bottom - sidePadding - gap);
+      const opensAbove = placement === "top" || (placement !== "bottom" && availableBelow < 240 && availableAbove > availableBelow);
+      const maxHeight = Math.min(320, opensAbove ? availableAbove : availableBelow);
+      const width = Math.min(anchor.width, window.innerWidth - sidePadding * 2);
+      const left = Math.max(sidePadding, Math.min(anchor.left, window.innerWidth - width - sidePadding));
+      const preferredTop = opensAbove ? anchor.top - maxHeight - gap : anchor.bottom + gap;
+      const top = Math.max(sidePadding, Math.min(preferredTop, window.innerHeight - maxHeight - sidePadding));
+
+      setMenuPosition({ top, left, width, maxHeight });
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open, placement]);
+
+  useLayoutEffect(() => {
+    if (!open || !menuPosition) return;
+    const anchor = wrapperRef.current?.getBoundingClientRect();
+    const menuHeight = menuRef.current?.getBoundingClientRect().height;
+    if (!anchor || !menuHeight) return;
+
+    const gap = 6;
+    const sidePadding = 8;
+    const availableAbove = Math.max(96, anchor.top - sidePadding - gap);
+    const availableBelow = Math.max(96, window.innerHeight - anchor.bottom - sidePadding - gap);
+    const opensAbove = placement === "top" || (placement !== "bottom" && availableBelow < 240 && availableAbove > availableBelow);
+    const preferredTop = opensAbove ? anchor.top - menuHeight - gap : anchor.bottom + gap;
+    const top = Math.max(sidePadding, Math.min(preferredTop, window.innerHeight - menuHeight - sidePadding));
+    setMenuPosition((current) => current.top === top ? current : { ...current, top });
+  }, [open, menuPosition, placement, filtered.length, showSearch]);
 
   return (
     <div ref={wrapperRef} className="relative w-full">
       <button
         type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
         onClick={() => {
           setOpen(!open);
           setQuery("");
@@ -72,12 +123,12 @@ export default function CustomSelect({
         />
       </button>
 
-      {open && (
+      {open && menuPosition && typeof document !== "undefined" && createPortal(
         <div
-          className={`absolute left-0 right-0 z-50 mt-1.5 overflow-hidden rounded-xl border shadow-2xl animate-scaleIn ${
-            darkMode
-              ? "border-zinc-800 bg-zinc-900 text-zinc-100"
-              : "border-zinc-200 bg-white text-zinc-900"
+          ref={menuRef}
+          style={{ position: "fixed", top: menuPosition.top, left: menuPosition.left, width: menuPosition.width, maxHeight: menuPosition.maxHeight }}
+          className={`z-[1000] overflow-hidden rounded-xl border shadow-2xl animate-scaleIn ${
+            darkMode ? "border-zinc-800 bg-zinc-900 text-zinc-100" : "border-zinc-200 bg-white text-zinc-900"
           }`}
         >
           {showSearch && (
@@ -98,7 +149,7 @@ export default function CustomSelect({
             </div>
           )}
 
-          <div className="max-h-56 space-y-0.5 overflow-y-auto p-1.5">
+          <div role="listbox" className="space-y-0.5 overflow-y-auto p-1.5" style={{ maxHeight: Math.max(72, menuPosition.maxHeight - (showSearch ? 46 : 0)) }}>
             {filtered.length === 0 ? (
               <div className="py-4 text-center text-xs opacity-50">Sonuç bulunamadı.</div>
             ) : (
@@ -108,6 +159,8 @@ export default function CustomSelect({
                   <button
                     key={opt.value}
                     type="button"
+                    role="option"
+                    aria-selected={isSelected}
                     onClick={() => {
                       onChange(opt.value);
                       setOpen(false);
@@ -135,7 +188,8 @@ export default function CustomSelect({
               })
             )}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );

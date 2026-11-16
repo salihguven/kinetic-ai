@@ -1,5 +1,6 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir: process.env.KINETIC_BUILD_DIR || ".next",
   async headers() {
     return [
       {
@@ -16,6 +17,15 @@ const nextConfig = {
   },
   cacheComponents: true,
   partialPrefetching: true,
+  experimental: {
+    ...(process.env.KINETIC_BUILD_WORKERS
+      ? {
+          cpus: Math.max(1, Number(process.env.KINETIC_BUILD_WORKERS) || 1),
+          staticGenerationMaxConcurrency: 1,
+          staticGenerationMinPagesPerWorker: 1000,
+        }
+      : {}),
+  },
   turbopack: {
     rules: {
       "*.css": {

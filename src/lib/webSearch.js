@@ -113,6 +113,40 @@ function containsAnyTerm(text, terms) {
   return new RegExp(`(?:^|[^\\p{L}\\p{N}_])(?:${alternatives})(?=$|[^\\p{L}\\p{N}_])`, "iu").test(text);
 }
 
+const QUERY_STOP_WORDS = new Set([
+  "kimdir", "nedir", "nasıl", "nasil", "ne", "kim", "mi", "mı", "mu", "mü",
+  "ile", "için", "icin", "hakkında", "hakkinda", "anlat", "bana", "lütfen", "lutfen",
+  "what", "who", "where", "when", "why", "how", "does", "did", "is", "are", "the", "a", "an",
+  "about", "please", "tell", "me", "explain", "find", "search", "latest", "current", "today",
+]);
+
+function normalizedTerms(text = "") {
+  return [...new Set(
+    text.toLocaleLowerCase("tr-TR")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/ı/g, "i")
+      .match(/[\p{L}\p{N}]+/gu) || []
+  )].filter((term) => term.length > 1 && !QUERY_STOP_WORDS.has(term));
+}
+
+export function filterRelevantSources(query, sources = []) {
+  const terms = normalizedTerms(query);
+  if (!terms.length) return [];
+
+  const required = terms.length === 1 ? 1 : Math.max(2, Math.ceil(terms.length * 0.6));
+  return sources
+    .map((source) => {
+      const searchable = normalizedTerms(`${source.title || ""} ${source.snippet || ""}`).join(" ");
+      const matchedTerms = terms.filter((term) => new RegExp(`(?:^| )${term.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?= |$)`, "u").test(searchable));
+      return { source, score: matchedTerms.length / terms.length, matched: matchedTerms.length };
+    })
+    .filter(({ matched }) => matched >= required)
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 4)
+    .map(({ source }) => source);
+}
+
 // Put country-specific dollar names before the generic "dolar" match.
 const FX_CURRENCIES = [
   { code: "CAD", names: ["cad", "kanada doları", "kanada dolarını", "kanada dolarının"] },
@@ -186,7 +220,7 @@ export function isTimeSensitiveQuery(query = "") {
   ]);
 }
 
-export async function searchLiveWeb(query) {
+export async function searchLiveWeb(query, { includeNews = false } = {}) {
   if (!query || query.trim().length < 2) return null;
 
   const currency = getExchangeRateCurrency(query);
@@ -196,14 +230,13 @@ export async function searchLiveWeb(query) {
     return rate ? { sources: [rate], contextText: formatSourceContext([rate]) } : null;
   }
 
-  const timeSensitive = isTimeSensitiveQuery(query);
   const [newsResult, wikiResult] = await Promise.allSettled([
-    searchGoogleNews(query),
-    timeSensitive ? Promise.resolve([]) : searchWikipedia(query),
+    includeNews ? searchGoogleNews(query) : Promise.resolve([]),
+    searchWikipedia(query),
   ]);
   const news = newsResult.status === "fulfilled" ? newsResult.value : [];
   const wiki = wikiResult.status === "fulfilled" ? wikiResult.value : [];
-  const sources = [...news, ...wiki];
+  const sources = filterRelevantSources(query, [...news, ...wiki]);
   if (sources.length === 0) return null;
 
   return { sources, contextText: formatSourceContext(sources) };
