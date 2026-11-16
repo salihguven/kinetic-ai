@@ -5,10 +5,9 @@ import { useState } from "react";
 import {
   sendEmailVerification,
   sendPasswordResetEmail,
-  deleteUser,
+  signOut,
 } from "firebase/auth";
-import { deleteDoc, doc } from "firebase/firestore";
-import { auth, db } from "@/lib/firebase";
+import { auth } from "@/lib/firebase";
 import {
   X,
   ShieldCheck,
@@ -69,17 +68,30 @@ export default function AccountModal({
     setErr("");
     setLoading(true);
     try {
-      await deleteDoc(doc(db, "users", firebaseUser.uid)).catch(() => {});
-      localStorage.removeItem("kinetic_ai_providers");
-      localStorage.removeItem("kinetic_ai_chats");
-      localStorage.removeItem("kinetic_ai_notes");
-      localStorage.removeItem("kinetic_ai_tasks");
-      await deleteUser(firebaseUser);
+      const idToken = await firebaseUser.getIdToken();
+      const response = await fetch("/api/account/delete", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${idToken}` },
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(result.error || "Hesap silinemedi.");
+      }
+
+      try {
+        localStorage.removeItem("kinetic_ai_providers");
+        localStorage.removeItem("kinetic_ai_chats");
+        localStorage.removeItem("kinetic_ai_notes");
+        localStorage.removeItem("kinetic_ai_tasks");
+        localStorage.removeItem(`kinetic_ban_${firebaseUser.uid}`);
+      } catch {
+        // The server-side account is already deleted; local cleanup is best effort.
+      }
+      await signOut(auth);
       onClose();
-    } catch {
-      setErr(
-        "Güvenlik gereği hesabınızı silmeden önce çıkış yapıp yeniden giriş yapmanız gerekiyor."
-      );
+      window.location.replace("/");
+    } catch (error) {
+      setErr(error.message || "Hesap silinemedi. Lütfen tekrar giriş yaptıktan sonra yeniden deneyin.");
     } finally {
       setLoading(false);
     }
@@ -90,8 +102,8 @@ export default function AccountModal({
     : "border-zinc-200 bg-white text-zinc-900";
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm">
-      <div className={`w-full max-w-md rounded-2xl border p-6 shadow-2xl ${cardClass}`}>
+      <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4 backdrop-blur-sm">
+      <div className={`max-h-[calc(100dvh-2rem)] w-full max-w-md overflow-y-auto rounded-2xl border p-6 shadow-2xl ${cardClass}`}>
         <div className="mb-5 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-emerald-400" />
@@ -139,9 +151,9 @@ export default function AccountModal({
                 {userProfile.dailyCount} / {dailyLimit}
               </span>
             </div>
-            <div className="h-2 w-full overflow-hidden rounded-full bg-zinc-800/60">
+            <div className={`h-2 w-full overflow-hidden rounded-full ${darkMode ? "bg-zinc-800/60" : "bg-zinc-300"}`}>
               <div
-                className="h-full rounded-full bg-emerald-400 transition-all"
+                className="h-full rounded-full bg-emerald-500 transition-all"
                 style={{ width: `${usagePct}%` }}
               />
             </div>
@@ -205,8 +217,9 @@ export default function AccountModal({
             ) : (
               <div className="space-y-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3">
                 <p className="text-red-300">
-                  Emin misiniz? Hesabınız, sohbetleriniz ve verileriniz kalıcı olarak
-                  silinecektir.
+                  Hesabınız ve KineticAI kayıtlarınız silinir; bu tarayıcıdaki sohbet,
+                  not, görev ve sağlayıcı ayarları temizlenir. Diğer cihazlardaki yerel
+                  kopyaları o cihazlardan ayrıca silmeniz gerekir.
                 </p>
                 <div className="flex gap-2">
                   <button

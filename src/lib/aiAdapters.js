@@ -1,5 +1,9 @@
 // src/lib/aiAdapters.js
 
+// Provider endpoints are user-configurable; never follow a redirect to an unchecked host.
+const fetch = (input, init = {}) =>
+  globalThis.fetch(input, { ...init, redirect: "error" });
+
 async function safeParseJSON(res) {
   const text = await res.text();
   try {
@@ -89,7 +93,7 @@ export async function callAIProvider({ provider, messages, systemPrompt }) {
     case "anthropic":
       return await callAnthropic({ baseUrl, apiKey, model, messages, systemPrompt });
     case "ollama":
-      return await callOllama({ baseUrl, model, messages, systemPrompt });
+      return await callOllama({ baseUrl, apiKey, model, messages, systemPrompt });
     case "custom":
       return await callCustomEndpoint({ baseUrl, apiKey, model, messages, systemPrompt });
     default:
@@ -115,7 +119,7 @@ export async function streamAIProvider({ provider, messages, systemPrompt, onTok
     case "anthropic":
       return await streamAnthropic({ baseUrl, apiKey, model, messages, systemPrompt, onToken });
     case "ollama":
-      return await streamOllama({ baseUrl, model, messages, systemPrompt, onToken });
+      return await streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, onToken });
     case "custom": {
       // Özel endpoint gerçek streaming desteklemiyor; tek seferde al, tek parça gönder.
       const full = await callCustomEndpoint({ baseUrl, apiKey, model, messages, systemPrompt });
@@ -503,13 +507,17 @@ function buildOllamaMessages({ messages, systemPrompt }) {
   ];
 }
 
-async function callOllama({ baseUrl, model, messages, systemPrompt }) {
-  const cleanBase = (baseUrl || "http://localhost:11434").replace(/\/+$/, "");
+async function callOllama({ baseUrl, apiKey, model, messages, systemPrompt }) {
+  if (!baseUrl || !apiKey) throw new Error("Uzak Ollama bağlantısı için HTTPS adresi ve proxy tokeni gerekli.");
+  const cleanBase = baseUrl.replace(/\/+$/, "");
   const url = `${cleanBase}/api/chat`;
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
     body: JSON.stringify({ model, stream: false, messages: buildOllamaMessages({ messages, systemPrompt }) }),
     signal: AbortSignal.timeout(20000),
   });
@@ -521,15 +529,23 @@ async function callOllama({ baseUrl, model, messages, systemPrompt }) {
   return reply;
 }
 
-async function streamOllama({ baseUrl, model, messages, systemPrompt, onToken }) {
-  const cleanBase = (baseUrl || "http://localhost:11434").replace(/\/+$/, "");
+async function streamOllama({ baseUrl, apiKey, model, messages, systemPrompt, onToken }) {
+  if (!baseUrl || !apiKey) {
+    const error = new Error("Uzak Ollama bağlantısı için HTTPS adresi ve proxy tokeni gerekli.");
+    error._noOutput = true;
+    throw error;
+  }
+  const cleanBase = baseUrl.replace(/\/+$/, "");
   const url = `${cleanBase}/api/chat`;
 
   let res;
   try {
     res = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
       body: JSON.stringify({ model, stream: true, messages: buildOllamaMessages({ messages, systemPrompt }) }),
       signal: AbortSignal.timeout(30000),
     });

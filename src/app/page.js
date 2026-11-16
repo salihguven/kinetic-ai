@@ -1,12 +1,18 @@
-// src/app/page.js
-import HomeClient from "@/components/HomeClient";
+import PublicLanding from "@/components/PublicLanding";
 
 export const metadata = {
-  title: "KineticAI · Ücretsiz Açık Yapay Zeka Çalışma Alanı",
+  title: "KineticAI by True Kinetic Studios | AI çalışma alanı",
   description:
-    "Kendi yapay zeka modellerinizi (OpenAI, Gemini, Groq, OpenRouter) tek bir arayüzde bağlayın. Sohbet edin, notlar çıkarın, görevlerinizi AI ile planlayın. Tamamen ücretsiz.",
+    "Kendi AI sağlayıcılarını tek bir çalışma alanında kullan. KineticAI ile sohbet et, web kaynaklarını doğrula, notlarını düzenle ve görevlerini planla.",
+  alternates: { canonical: "/" },
+  openGraph: {
+    title: "KineticAI by True Kinetic Studios",
+    description: "AI sohbeti, kaynaklarla çalışma ve görev planlama için bağımsız çalışma alanı.",
+    type: "website",
+    locale: "tr_TR",
+  },
 };
 
 export default function Page() {
-  return <HomeClient />;
+  return <PublicLanding />;
 }

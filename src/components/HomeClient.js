@@ -5,9 +5,8 @@ import { useState, useEffect, useRef } from "react";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import CustomSelect from "@/components/CustomSelect";
 import { readSSE } from "@/lib/sseClient";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import QuotaCard from "@/components/QuotaCard";
-import AdBanner from "@/components/AdBanner";
 import { auth, db } from "@/lib/firebase";
 import { TRANSLATIONS } from "@/lib/i18n";
 import {
@@ -33,6 +32,9 @@ import {
   Square,
   Download,
   X,
+  Search,
+  Pencil,
+  Mic,
   FileText,
   Image as ImageIcon,
   ShieldCheck,
@@ -53,7 +55,6 @@ import KineticLogo from "@/components/KineticLogo";
 import ChatEmptyState from "@/components/ChatEmptyState";
 import ProviderModal from "@/components/ProviderModal";
 import MarkdownMessage from "@/components/MarkdownMessage";
-import LandingContent from "@/components/LandingContent";
 import AccountModal from "@/components/AccountModal";
 import LegalModal from "@/components/LegalModal";
 import TutorModal from "@/components/TutorModal";
@@ -61,6 +62,7 @@ import NotebookStudio from "@/components/NotebookStudio";
 import TaskManager from "@/components/TaskManager";
 import ConfirmModal from "@/components/ConfirmModal";
 import PermissionModal from "@/components/PermissionModal";
+import UpdatesModal from "@/components/UpdatesModal";
 import { AppBootSkeleton, MessageSkeleton } from "@/components/SkeletonLoader";
 
 const ASSISTANT_PRESETS = {
@@ -119,7 +121,14 @@ function createEmptyChat() {
 }
 
 function getTodayKey() {
-  return new Date().toISOString().slice(0, 10);
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Istanbul",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(new Date());
+  const values = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+  return `${values.year}-${values.month}-${values.day}`;
 }
 
 export default function HomeClient() {
@@ -136,6 +145,9 @@ export default function HomeClient() {
   const [providers, setProviders] = useState([]);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState("");
+  const [chatSearch, setChatSearch] = useState("");
+  const [editingChatId, setEditingChatId] = useState("");
+  const [editingChatTitle, setEditingChatTitle] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
 
   const [activeProviderId, setActiveProviderId] = useState("");
@@ -155,9 +167,10 @@ export default function HomeClient() {
   const [errorMsg, setErrorMsg] = useState("");
   const [copiedIndex, setCopiedIndex] = useState(null);
   const [webSearch, setWebSearch] = useState(false);
+  const [isListening, setIsListening] = useState(false);
 
   const [banUntil, setBanUntil] = useState(0);
-  const [remainingSec, setRemainingSec] = useState(0);
+  const [clockNow, setClockNow] = useState(0);
 
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isAccountOpen, setIsAccountOpen] = useState(false);
@@ -170,9 +183,21 @@ export default function HomeClient() {
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+
+  useEffect(() => () => speechRecognitionRef.current?.stop(), []);
 
   const t = TRANSLATIONS[lang] || TRANSLATIONS.tr;
   const optClass = darkMode ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900";
+  const normalizedChatSearch = chatSearch.trim().toLocaleLowerCase(lang === "tr" ? "tr-TR" : "en-US");
+  const remainingSec = banUntil
+    ? Math.max(0, Math.ceil((banUntil - clockNow) / 1000))
+    : 0;
+  const filteredChats = chats.filter((chat) =>
+    `${chat.title} ${chat.messages?.map((message) => message.content).join(" ") || ""}`
+      .toLocaleLowerCase(lang === "tr" ? "tr-TR" : "en-US")
+      .includes(normalizedChatSearch)
+  );
 
   // 1. Firebase Oturum & Ceza Takibi
   useEffect(() => {
@@ -180,7 +205,7 @@ export default function HomeClient() {
       if (!user) {
         setFirebaseUser(null);
         setUserProfile(null);
-        setAuthChecking(false);
+        window.location.replace("/");
         return;
       }
 
@@ -206,7 +231,9 @@ export default function HomeClient() {
         if (penRes.ok) {
           const penData = await penRes.json();
           if (penData.blocked && penData.remainingSeconds > 0) {
-            setBanUntil(Date.now() + penData.remainingSeconds * 1000);
+            const now = Date.now();
+            setClockNow(now);
+            setBanUntil(now + penData.remainingSeconds * 1000);
           }
         }
       } catch {
@@ -222,23 +249,16 @@ export default function HomeClient() {
 
         if (snap.exists()) {
           const data = snap.data();
-          const resetNeeded = data.lastResetDate !== today;
           const profile = {
             ...baseProfile,
             name: data.name || baseProfile.name,
-            dailyCount: resetNeeded ? 0 : Number(data.dailyCount || 0),
+            dailyCount: data.lastResetDate === today ? Number(data.dailyCount || 0) : 0,
             lastResetDate: today,
             banned: Boolean(data.banned),
             banReason: data.banReason || "Topluluk kurallarını ihlal ettiniz.",
           };
-          if (resetNeeded) {
-            setDoc(userRef, { dailyCount: 0, lastResetDate: today }, { merge: true }).catch(
-              () => { }
-            );
-          }
           setUserProfile(profile);
         } else {
-          setDoc(userRef, baseProfile).catch(() => { });
           setUserProfile(baseProfile);
         }
       } catch {
@@ -255,6 +275,8 @@ export default function HomeClient() {
   useEffect(() => {
     try {
       const savedLang = localStorage.getItem("kinetic_ai_lang");
+      // Restoring browser-only preferences after hydration avoids a server/client markup mismatch.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       if (savedLang === "en" || savedLang === "tr") setLang(savedLang);
 
       const savedTheme = localStorage.getItem("kinetic_ai_theme");
@@ -319,6 +341,7 @@ export default function HomeClient() {
           content: m.content,
           providerName: m.providerName,
           attachmentNames: m.attachmentNames,
+          sources: m.sources,
         })),
       }));
       localStorage.setItem("kinetic_ai_chats", JSON.stringify(lightChats));
@@ -330,29 +353,37 @@ export default function HomeClient() {
   // 3. Süreli Ceza Geri Sayımı
   useEffect(() => {
     if (!firebaseUser) return;
-    const savedBan = Number(localStorage.getItem(`kinetic_ban_${firebaseUser.uid}`) || 0);
-    if (savedBan > Date.now()) setBanUntil(savedBan);
+    let savedBan = 0;
+    try {
+      savedBan = Number(localStorage.getItem(`kinetic_ban_${firebaseUser.uid}`) || 0);
+    } catch {
+      return;
+    }
+    if (savedBan > Date.now()) {
+      const timer = window.setTimeout(() => {
+        setClockNow(Date.now());
+        setBanUntil(savedBan);
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
   }, [firebaseUser]);
 
   useEffect(() => {
-    if (!banUntil || banUntil <= Date.now()) {
-      setRemainingSec(0);
-      if (firebaseUser) localStorage.removeItem(`kinetic_ban_${firebaseUser.uid}`);
-      return;
-    }
+    if (!banUntil) return;
 
     const updateTimer = () => {
-      const diff = Math.ceil((banUntil - Date.now()) / 1000);
-      if (diff <= 0) {
+      const now = Date.now();
+      setClockNow(now);
+      if (banUntil <= now) {
         setBanUntil(0);
-        setRemainingSec(0);
-        if (firebaseUser) localStorage.removeItem(`kinetic_ban_${firebaseUser.uid}`);
-      } else {
-        setRemainingSec(diff);
+        try {
+          if (firebaseUser) localStorage.removeItem(`kinetic_ban_${firebaseUser.uid}`);
+        } catch {
+          // The ban expires server-side even when browser storage is unavailable.
+        }
       }
     };
 
-    updateTimer();
     const interval = setInterval(updateTimer, 1000);
     return () => clearInterval(interval);
   }, [banUntil, firebaseUser]);
@@ -390,10 +421,7 @@ export default function HomeClient() {
 
   // 5. Uzun Süren Yanıtlarda Timeout Alternatifi
   useEffect(() => {
-    if (!isLoading) {
-      setIsSlowWait(false);
-      return;
-    }
+    if (!isLoading) return;
     const timer = setTimeout(() => setIsSlowWait(true), 18000);
     return () => clearTimeout(timer);
   }, [isLoading]);
@@ -410,12 +438,12 @@ export default function HomeClient() {
   }
 
   if (!firebaseUser || !userProfile) {
-    return <LandingContent darkMode={darkMode} setDarkMode={setDarkMode} />;
+    return <AppBootSkeleton darkMode={darkMode} />;
   }
 
   if (userProfile.banned) {
     return (
-      <div className="flex h-screen flex-col items-center justify-center bg-zinc-950 p-6 text-center text-zinc-100 safe-top safe-bottom">
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-zinc-950 p-6 text-center text-zinc-100 safe-top safe-bottom">
         <div className="max-w-md rounded-2xl border border-red-500/30 bg-red-500/10 p-6 animate-scaleIn">
           <Ban className="mx-auto mb-3 h-10 w-10 text-red-400" />
           <h1 className="text-lg font-bold text-red-300">Hesabınız Askıya Alındı</h1>
@@ -435,7 +463,7 @@ export default function HomeClient() {
     const mins = String(Math.floor(remainingSec / 60)).padStart(2, "0");
     const secs = String(remainingSec % 60).padStart(2, "0");
     return (
-      <div className="flex h-screen flex-col items-center justify-center bg-zinc-950 p-6 text-center text-zinc-100 safe-top safe-bottom animate-fadeIn">
+      <div className="flex min-h-dvh flex-col items-center justify-center bg-zinc-950 p-6 text-center text-zinc-100 safe-top safe-bottom animate-fadeIn">
         <div className="max-w-md rounded-2xl border border-amber-500/30 bg-amber-500/10 p-7">
           <Ban className="mx-auto mb-3 h-10 w-10 text-amber-400" />
           <h1 className="text-lg font-bold text-amber-300">
@@ -508,7 +536,7 @@ export default function HomeClient() {
 
     const idToken = await firebaseUser.getIdToken();
     const fallbackProviders = autoFallback
-      ? providers.filter((p) => p.id !== targetProvider.id)
+      ? providers.filter((p) => p.id !== targetProvider.id).slice(0, 5)
       : [];
 
     const res = await fetch("/api/chat", {
@@ -542,6 +570,7 @@ export default function HomeClient() {
         );
       }
       if (data.code === "TEMP_BAN" && data.banUntil) {
+        setClockNow(Date.now());
         setBanUntil(data.banUntil);
         localStorage.setItem(`kinetic_ban_${firebaseUser.uid}`, String(data.banUntil));
       }
@@ -549,7 +578,7 @@ export default function HomeClient() {
     }
 
     if (typeof data.newDailyCount === "number") {
-      setUserProfile((prev) => (prev ? { ...prev, dailyCount: data.newDailyCount } : prev));
+      setUserProfile((prev) => (prev ? { ...prev, dailyCount: Math.max(prev.dailyCount || 0, data.newDailyCount) } : prev));
     }
 
     return data;
@@ -595,6 +624,20 @@ export default function HomeClient() {
         triggerHaptic("success");
       },
     });
+  };
+
+  const beginRenameChat = (event, chat) => {
+    event.stopPropagation();
+    setEditingChatId(chat.id);
+    setEditingChatTitle(chat.title || "");
+  };
+
+  const saveRenameChat = (id) => {
+    const title = editingChatTitle.trim().slice(0, 80);
+    if (!title) return;
+    setChats((previous) => previous.map((chat) => chat.id === id ? { ...chat, title, updatedAt: Date.now() } : chat));
+    setEditingChatId("");
+    setEditingChatTitle("");
   };
 
   const requestDeleteProvider = (id) => {
@@ -764,6 +807,7 @@ export default function HomeClient() {
     const controller = new AbortController();
     abortControllerRef.current = controller;
     setErrorMsg("");
+    setIsSlowWait(false);
     setIsLoading(true);
 
     // Boş bir asistan mesajı hemen ekle, içini akarken dolduracağız.
@@ -796,7 +840,7 @@ export default function HomeClient() {
 
       const idToken = await firebaseUser.getIdToken();
       const fallbackProviders = autoFallback
-        ? providers.filter((p) => p.id !== activeProvider.id)
+        ? providers.filter((p) => p.id !== activeProvider.id).slice(0, 5)
         : [];
 
       const res = await fetch("/api/chat", {
@@ -824,11 +868,11 @@ export default function HomeClient() {
         chunk: ({ text }) => {
           updateStreamingMessage((msg) => ({ ...msg, content: msg.content + text }));
         },
-        done: ({ usedProvider, usedModel, isFallback, newDailyCount }) => {
+        done: ({ usedProvider, usedModel, isFallback, newDailyCount, webSources = [] }) => {
           const label = isFallback ? `Yedek AI · ${usedProvider} (${usedModel})` : `${usedProvider} · ${usedModel}`;
-          updateStreamingMessage((msg) => ({ ...msg, providerName: label, streaming: false }));
+          updateStreamingMessage((msg) => ({ ...msg, providerName: label, sources: webSources, streaming: false }));
           if (typeof newDailyCount === "number") {
-            setUserProfile((prev) => (prev ? { ...prev, dailyCount: newDailyCount } : prev));
+            setUserProfile((prev) => (prev ? { ...prev, dailyCount: Math.max(prev.dailyCount || 0, newDailyCount) } : prev));
           }
         },
         error: ({ message }) => {
@@ -995,9 +1039,41 @@ export default function HomeClient() {
     }
   };
 
+  const handleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setErrorMsg(lang === "en" ? "Voice input is not supported in this browser." : "Bu tarayıcı sesle yazmayı desteklemiyor.");
+      return;
+    }
+    if (isListening) {
+      speechRecognitionRef.current?.stop();
+      setIsListening(false);
+      return;
+    }
+    const recognition = new SpeechRecognition();
+    speechRecognitionRef.current = recognition;
+    recognition.lang = lang === "en" ? "en-US" : "tr-TR";
+    recognition.interimResults = false;
+    recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results).map((result) => result[0]?.transcript || "").join(" ").trim();
+      if (transcript) setInput((current) => current ? `${current} ${transcript}` : transcript);
+    };
+    recognition.onerror = () => setErrorMsg(lang === "en" ? "Could not access voice input. Check microphone permission." : "Ses tanınamadı. Mikrofon iznini kontrol edin.");
+    recognition.onend = () => setIsListening(false);
+    setErrorMsg("");
+    setIsListening(true);
+    try {
+      recognition.start();
+    } catch {
+      setIsListening(false);
+      setErrorMsg(lang === "en" ? "Voice input could not start." : "Sesle yazma başlatılamadı.");
+    }
+  };
+
   return (
     <div
-      className={`flex h-screen overflow-hidden transition-colors safe-top safe-bottom ${darkMode
+      className={`flex h-dvh overflow-hidden transition-colors safe-top safe-bottom ${darkMode
           ? "theme-dark bg-zinc-950 text-zinc-100"
           : "theme-light bg-zinc-50 text-zinc-900"
         }`}
@@ -1186,10 +1262,25 @@ export default function HomeClient() {
           </button>
         </div>
 
+        {sidebarListTab === "chats" && chats.length > 0 && (
+          <label className={`mb-2 flex min-h-[38px] items-center gap-2 rounded-lg border px-2.5 ${darkMode ? "border-zinc-800 bg-zinc-950/50" : "border-zinc-300 bg-zinc-50"}`}>
+            <Search className="h-3.5 w-3.5 shrink-0 opacity-45" />
+            <input
+              value={chatSearch}
+              onChange={(event) => setChatSearch(event.target.value)}
+              placeholder={lang === "en" ? "Search chats" : "Sohbetlerde ara"}
+              aria-label={lang === "en" ? "Search conversations" : "Sohbetlerde ara"}
+              className="min-w-0 flex-1 bg-transparent text-xs outline-none placeholder:opacity-45"
+            />
+            {chatSearch && <button type="button" onClick={() => setChatSearch("")} aria-label={lang === "en" ? "Clear search" : "Aramayı temizle"} className="text-xs opacity-50 hover:opacity-100">×</button>}
+          </label>
+        )}
+
         {/* TAM BOY FERAH LİSTE ALANI */}
         <div className="mb-3 flex-1 divide-y divide-zinc-800/30 overflow-y-auto pr-1">
           {sidebarListTab === "chats" ? (
-            chats.map((chat) => {
+            <>
+            {filteredChats.map((chat) => {
               const isCurrent = chat.id === activeChat?.id && activeTab === "chat";
               return (
                 <div
@@ -1210,12 +1301,39 @@ export default function HomeClient() {
                       : "opacity-75 hover:bg-zinc-800/30 hover:opacity-100"
                     }`}
                 >
-                  <div className="min-w-0">
-                    <div className="truncate">{chat.title}</div>
+                  <div className="min-w-0 flex-1">
+                    {editingChatId === chat.id ? (
+                      <input
+                        autoFocus
+                        value={editingChatTitle}
+                        maxLength={80}
+                        onClick={(event) => event.stopPropagation()}
+                        onChange={(event) => setEditingChatTitle(event.target.value)}
+                        onKeyDown={(event) => {
+                          event.stopPropagation();
+                          if (event.key === "Enter") saveRenameChat(chat.id);
+                          if (event.key === "Escape") setEditingChatId("");
+                        }}
+                        onBlur={() => setEditingChatId("")}
+                        className="w-full rounded bg-transparent text-xs outline-none ring-1 ring-emerald-500/50"
+                        aria-label={lang === "en" ? "Conversation title" : "Sohbet başlığı"}
+                      />
+                    ) : <div className="truncate">{chat.title}</div>}
                     <div className="mt-0.5 text-[10px] opacity-45">
                       {formatRelativeTime(chat.updatedAt, lang)}
                     </div>
                   </div>
+                  {editingChatId !== chat.id && (
+                    <button
+                      type="button"
+                      onClick={(event) => beginRenameChat(event, chat)}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg opacity-30 transition hover:bg-emerald-500/10 hover:text-emerald-500 group-hover:opacity-100"
+                      aria-label={lang === "en" ? `Rename ${chat.title}` : `${chat.title} sohbetini yeniden adlandır`}
+                      title={lang === "en" ? "Rename chat" : "Sohbeti yeniden adlandır"}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1228,7 +1346,11 @@ export default function HomeClient() {
                   </button>
                 </div>
               );
-            })
+            })}
+            {normalizedChatSearch && filteredChats.length === 0 && (
+              <p className="mt-3 rounded-lg px-2 py-4 text-center text-xs opacity-50">{lang === "en" ? "No matching chats." : "Eşleşen sohbet bulunamadı."}</p>
+            )}
+            </>
           ) : providers.length === 0 ? (
             <div className="mt-3 rounded-xl border border-dashed border-zinc-700/50 p-4 text-center text-xs opacity-60">
               {t.noModelsDesc}
@@ -1306,16 +1428,22 @@ export default function HomeClient() {
             dailyCount={userProfile.dailyCount}
             dailyLimit={100}
             onOpenAccount={() => setIsAccountOpen(true)}
-            onBonusEarned={(bonus) => {
-              setUserProfile((prev) =>
-                prev ? { ...prev, dailyCount: Math.max(0, prev.dailyCount - bonus) } : prev
-              );
-            }}
             darkMode={darkMode}
             lang={lang}
           />
 
           {/* Gizlilik & Kullanım Koşulları */}
+          <button
+            onClick={() => {
+              setMobileMenuOpen(false);
+              setActiveTab("updates");
+            }}
+            className={`flex min-h-[34px] w-full items-center justify-center gap-1.5 rounded-lg text-[10px] font-medium transition ${activeTab === "updates" ? "bg-emerald-500/10 text-emerald-500" : `hover:bg-zinc-800/30 hover:underline ${darkMode ? "text-zinc-300" : "text-zinc-600"}`}`}
+          >
+            <Link2 className="h-3 w-3" />
+            Güncellemeler
+          </button>
+
           <button
             onClick={() => setIsLegalOpen(true)}
             className="flex min-h-[32px] w-full items-center justify-center gap-1 text-[10px] opacity-50 hover:underline hover:opacity-90"
@@ -1323,6 +1451,7 @@ export default function HomeClient() {
             <Scale className="h-3 w-3" />
             {t.legal}
           </button>
+          <p className="pb-1 text-center text-[9px] opacity-35">KineticAI by True Kinetic Studios</p>
         </div>
       </aside>
 
@@ -1351,7 +1480,9 @@ export default function HomeClient() {
               </button>
             )}
 
-            {activeProvider ? (
+            {activeTab === "updates" ? (
+              <span className="font-semibold">KineticAI güncellemeleri</span>
+            ) : activeProvider ? (
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="font-semibold">{activeProvider.name}</span>
                 {activeTab === "chat" && chainMode && secondaryProvider && (
@@ -1454,6 +1585,7 @@ export default function HomeClient() {
                 </label>
                 <textarea
                   rows={2}
+                  maxLength={3000}
                   value={customInstruction}
                   onChange={(e) => setCustomInstruction(e.target.value)}
                   placeholder="Boş bırakılırsa seçili kişilik uygulanır..."
@@ -1539,6 +1671,15 @@ export default function HomeClient() {
           </div>
         )}
 
+        {activeTab === "updates" && (
+          <UpdatesModal
+            isOpen
+            embedded
+            onClose={() => switchTab("chat")}
+            darkMode={darkMode}
+          />
+        )}
+
         {activeTab === "chat" && (
           <>
             <div className="flex-1 overflow-y-auto px-4 py-6">
@@ -1588,6 +1729,34 @@ export default function HomeClient() {
                           )}
 
                           <MarkdownMessage content={msg.content} darkMode={darkMode} />
+
+                          {isAssistant && msg.sources?.length > 0 && (
+                            <section
+                              aria-label={lang === "en" ? "Sources" : "Kaynaklar"}
+                              className={`mt-3 rounded-xl border p-3 text-left ${darkMode ? "border-zinc-800 bg-zinc-900/50" : "border-zinc-200 bg-zinc-100/70"}`}
+                            >
+                              <h3 className="mb-2 text-[11px] font-semibold opacity-70">
+                                {lang === "en" ? "Sources used" : "Yanıtta kullanılan kaynaklar"}
+                              </h3>
+                              <ul className="space-y-1.5">
+                                {msg.sources.map((source, sourceIndex) => (
+                                  <li key={`${source.url}-${sourceIndex}`} className="min-w-0">
+                                    <a
+                                      href={source.url}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="block truncate text-xs text-emerald-500 underline decoration-emerald-500/30 underline-offset-2 hover:decoration-emerald-500"
+                                    >
+                                      {source.title}
+                                    </a>
+                                    <span className="text-[10px] opacity-50">
+                                      {source.source}{source.date ? ` · ${source.date}` : ""}
+                                    </span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </section>
+                          )}
 
                           {msg.streaming && (
                             <span className="ml-0.5 inline-block h-3.5 w-1.5 animate-pulse bg-emerald-400 align-middle" />
@@ -1722,11 +1891,12 @@ export default function HomeClient() {
                       setWebSearch(!webSearch);
                     }}
                     disabled={isLoading}
+                    aria-pressed={webSearch}
                     className={`flex min-h-[44px] shrink-0 items-center gap-1 rounded-xl px-2.5 text-xs font-medium transition ${webSearch
                         ? "border border-emerald-500/40 bg-emerald-500/15 text-emerald-400"
                         : "opacity-60 hover:bg-zinc-800/30 hover:opacity-100"
                       }`}
-                    title="Canlı Web Arama (Google Haberler & Wikipedia)"
+                    title={lang === "en" ? "Search the web; current exchange rates use the official central-bank feed." : "Web'de ara; güncel döviz sorularında resmi TCMB verisi kullanılır."}
                   >
                     <Globe className="h-4 w-4" />
                     <span className="hidden sm:inline">Web</span>
@@ -1740,6 +1910,17 @@ export default function HomeClient() {
                     placeholder={t.inputPlaceholder}
                     className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-1 py-2.5 text-sm outline-none"
                   />
+
+                  <button
+                    type="button"
+                    onClick={handleVoiceInput}
+                    disabled={isLoading}
+                    aria-label={isListening ? (lang === "en" ? "Stop voice input" : "Sesle yazmayı durdur") : (lang === "en" ? "Start voice input" : "Sesle yazmayı başlat")}
+                    title={isListening ? (lang === "en" ? "Listening…" : "Dinleniyor…") : (lang === "en" ? "Voice input" : "Sesle yaz")}
+                    className={`flex min-h-[44px] min-w-[40px] shrink-0 items-center justify-center rounded-xl transition disabled:opacity-30 ${isListening ? "bg-red-500/15 text-red-500 animate-pulse" : "opacity-60 hover:bg-zinc-800/30 hover:opacity-100"}`}
+                  >
+                    <Mic className="h-4 w-4" />
+                  </button>
 
                   {isLoading ? (
                     <button
@@ -1797,6 +1978,7 @@ export default function HomeClient() {
         onClose={() => setIsLegalOpen(false)}
         darkMode={darkMode}
       />
+
 
       <TutorModal
         isOpen={isTutorOpen}

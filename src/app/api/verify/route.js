@@ -3,6 +3,14 @@ import { NextResponse } from "next/server";
 import { checkRateLimit, validateSafeUrl } from "@/lib/security";
 import { callAIProvider } from "@/lib/aiAdapters";
 
+// Verification endpoints may be user-configured; redirects could bypass URL checks.
+const fetch = (input, init = {}) =>
+  globalThis.fetch(input, {
+    signal: AbortSignal.timeout(12_000),
+    ...init,
+    redirect: "error",
+  });
+
 async function safeJson(res) {
   const text = await res.text();
   try {
@@ -40,19 +48,44 @@ function filterAndSortModels(ids, priorityList) {
 
 export async function POST(request) {
   try {
+    const contentLength = Number(request.headers.get("content-length") || 0);
+    if (contentLength > 100_000) {
+      return NextResponse.json({ error: "İstek boyutu çok büyük." }, { status: 413 });
+    }
+    const rawBody = await request.text();
+    if (new TextEncoder().encode(rawBody).byteLength > 100_000) {
+      return NextResponse.json({ error: "İstek boyutu çok büyük." }, { status: 413 });
+    }
     const rate = checkRateLimit(request, 15, 60_000);
     if (!rate.allowed) {
       return NextResponse.json({ error: rate.message }, { status: 429 });
     }
 
-    const { provider } = await request.json();
+    let body;
+    try {
+      body = JSON.parse(rawBody);
+    } catch {
+      return NextResponse.json({ error: "İstek JSON biçiminde değil." }, { status: 400 });
+    }
+    const { provider } = body || {};
     if (!provider || !provider.type) {
       return NextResponse.json({ error: "Geçersiz sağlayıcı bilgisi." }, { status: 400 });
     }
 
     const { type, baseUrl, apiKey } = provider;
 
-    if (baseUrl && !validateSafeUrl(baseUrl)) {
+    if (typeof apiKey !== "undefined" && (typeof apiKey !== "string" || apiKey.length > 500)) {
+      return NextResponse.json({ error: "API anahtarı biçimi geçersiz." }, { status: 400 });
+    }
+
+    if (["ollama", "custom"].includes(type) && (typeof baseUrl !== "string" || !baseUrl.trim())) {
+      return NextResponse.json({ error: "Bu sağlayıcı için HTTPS endpoint adresi zorunludur." }, { status: 400 });
+    }
+    if (type === "ollama" && !apiKey?.trim()) {
+      return NextResponse.json({ error: "Uzak Ollama proxy tokeni zorunludur." }, { status: 400 });
+    }
+
+    if (baseUrl && !(await validateSafeUrl(baseUrl))) {
       return NextResponse.json(
         { error: "Güvenlik engeli: Geçersiz veya izin verilmeyen URL protokolü." },
         { status: 400 }
@@ -162,8 +195,11 @@ export async function POST(request) {
 
     // 4. OLLAMA DOĞRULAMA
     if (type === "ollama") {
-      const rootBase = (baseUrl || "http://localhost:11434").replace(/\/+$/, "");
-      const res = await fetch(`${rootBase}/api/tags`);
+      const rootBase = baseUrl.replace(/\/+$/, "");
+      const res = await fetch(`${rootBase}/api/tags`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(10000),
+      });
       const data = await safeJson(res);
       if (!res.ok) {
         return NextResponse.json(

@@ -5,15 +5,7 @@ import { Plus, MessageSquare, Code2, Mail, Globe } from "lucide-react";
 import KineticLogo from "./KineticLogo";
 
 function getGreeting(lang) {
-  const hour = new Date().getHours();
-  if (lang === "en") {
-    if (hour < 12) return "Good morning";
-    if (hour < 18) return "Good afternoon";
-    return "Good evening";
-  }
-  if (hour < 12) return "Günaydın";
-  if (hour < 18) return "İyi günler";
-  return "İyi akşamlar";
+  return lang === "en" ? "Hello" : "Merhaba";
 }
 
 const QUICK_CARDS = [

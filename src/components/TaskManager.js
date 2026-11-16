@@ -20,23 +20,35 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode }) {
   const [aiLoading, setAiLoading] = useState(false);
   const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
+  const [tasksLoaded, setTasksLoaded] = useState(false);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("kinetic_ai_tasks");
-      if (saved) setTasks(JSON.parse(saved));
-    } catch {
-      // ignore
-    }
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const saved = localStorage.getItem("kinetic_ai_tasks");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setTasks(parsed.filter((task) => task && typeof task.id === "string" && typeof task.title === "string"));
+          }
+        }
+      } catch {
+        // Keep an empty workspace when stored data is malformed or unavailable.
+      } finally {
+        setTasksLoaded(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
+    if (!tasksLoaded) return;
     try {
       localStorage.setItem("kinetic_ai_tasks", JSON.stringify(tasks));
     } catch {
       // ignore
     }
-  }, [tasks]);
+  }, [tasks, tasksLoaded]);
 
   const handleAddTask = (e) => {
     e.preventDefault();

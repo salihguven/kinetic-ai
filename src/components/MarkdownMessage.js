@@ -151,6 +151,8 @@ export default function MarkdownMessage({ content, darkMode }) {
               {children}
             </a>
           ),
+          // Markdown can contain arbitrary remote image hosts; Next Image would require trusting each domain.
+          /* eslint-disable @next/next/no-img-element */
           img: ({ src, alt }) => (
             <img
               src={src}
@@ -161,6 +163,7 @@ export default function MarkdownMessage({ content, darkMode }) {
               }`}
             />
           ),
+          /* eslint-enable @next/next/no-img-element */
           table: ({ children }) => (
             <div
               className={`my-3 overflow-x-auto rounded-xl border ${

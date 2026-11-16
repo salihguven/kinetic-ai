@@ -38,27 +38,25 @@ export default function LegalModal({ isOpen, onClose, darkMode, lang = "tr" }) {
         </div>
 
         <div className="space-y-4 overflow-y-auto p-6 text-xs leading-relaxed">
-          {/* 1. Bireysel Proje Bildirimi */}
+          {/* 1. Service provider and disclaimer */}
           <section className={`rounded-xl border p-4 ${boxClass}`}>
             <h3 className="mb-1.5 flex items-center gap-2 text-sm font-semibold">
               <Shield className="h-4 w-4 text-emerald-400" />
               {isEn
-                ? "1. Individual Project & Disclaimer"
-                : "1. Bireysel Proje Statüsü ve Sorumluluk Reddi"}
+                ? "1. True Kinetic Studios & Disclaimer"
+                : "1. True Kinetic Studios ve sorumluluk reddi"}
             </h3>
             <p className="opacity-80">
               {isEn ? (
                 <>
-                  <strong>KineticAI</strong> is an independent, non-commercial, free
-                  project developed by an individual (not a registered company or legal
-                  entity). The service is provided &quot;as-is&quot; without uptime or
-                  accuracy guarantees.
+                  <strong>KineticAI by True Kinetic Studios</strong> is provided
+                  &quot;as-is&quot; without uptime or accuracy guarantees. Third-party
+                  AI providers may apply their own pricing and terms.
                 </>
               ) : (
                 <>
-                  <strong>KineticAI</strong>, ticari bir şirket veya kurum tarafından değil,
-                  bireysel bir geliştirici tarafından tamamen ücretsiz ve açık amaçlı
-                  sunulmaktadır. Hizmet &quot;olduğu gibi&quot; (as-is) sağlanır;
+                  <strong>KineticAI by True Kinetic Studios</strong> hizmeti
+                  &quot;olduğu gibi&quot; (as-is) sunulur;
                   kesintisiz çalışma veya yanıt doğruluğu garantisi verilmez.
                 </>
               )}

@@ -26,25 +26,37 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode }) {
   const [question, setQuestion] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sourcesLoaded, setSourcesLoaded] = useState(false);
 
   const fileRef = useRef(null);
 
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem("kinetic_ai_notes");
-      if (saved) setSources(JSON.parse(saved));
-    } catch {
-      // ignore
-    }
+    const frame = window.requestAnimationFrame(() => {
+      try {
+        const saved = localStorage.getItem("kinetic_ai_notes");
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            setSources(parsed.filter((item) => item && typeof item.id === "string" && typeof item.title === "string" && typeof item.content === "string"));
+          }
+        }
+      } catch {
+        // Keep an empty workspace when stored data is malformed or unavailable.
+      } finally {
+        setSourcesLoaded(true);
+      }
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   useEffect(() => {
+    if (!sourcesLoaded) return;
     try {
       localStorage.setItem("kinetic_ai_notes", JSON.stringify(sources));
     } catch {
       // ignore
     }
-  }, [sources]);
+  }, [sources, sourcesLoaded]);
 
   const handleFileUpload = async (e) => {
     const files = Array.from(e.target.files || []);

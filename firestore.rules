@@ -1,0 +1,79 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function protectedFields() {
+      return [
+        'banned',
+        'banReason',
+        'role',
+        'admin',
+        'tester',
+        'warnings',
+        'moderationBanUntil',
+        'moderationReason',
+        'moderationUpdatedAt',
+        'dailyCount',
+        'lastResetDate'
+      ];
+    }
+
+    function profileFields() {
+      return ['name', 'email', 'photoURL'];
+    }
+
+    function validProfileData(data) {
+      return data.keys().hasOnly(profileFields())
+        && data.keys().hasAny(['name', 'email'])
+        && (!data.keys().hasAny(['name']) || (data.name is string && data.name.size() <= 80))
+        && (!data.keys().hasAny(['email']) || (data.email is string && data.email.size() <= 320))
+        && (!data.keys().hasAny(['photoURL']) || (data.photoURL is string && data.photoURL.size() <= 2048));
+    }
+
+    function validProfileUpdate() {
+      let changedFields = request.resource.data.diff(resource.data).affectedKeys();
+      return changedFields.hasOnly(profileFields())
+        && !changedFields.hasAny(protectedFields())
+        && (!changedFields.hasAny(['name']) || !request.resource.data.keys().hasAny(['name']) || (request.resource.data.name is string && request.resource.data.name.size() <= 80))
+        && (!changedFields.hasAny(['email']) || !request.resource.data.keys().hasAny(['email']) || (request.resource.data.email is string && request.resource.data.email.size() <= 320))
+        && (!changedFields.hasAny(['photoURL']) || !request.resource.data.keys().hasAny(['photoURL']) || (request.resource.data.photoURL is string && request.resource.data.photoURL.size() <= 2048));
+    }
+
+    match /users/{userId} {
+      // A user can fetch their own profile, but cannot list user documents.
+      allow get: if isOwner(userId);
+      allow list: if false;
+
+      // Only ordinary profile fields are client writable. Quota and moderation
+      // state remain exclusively controlled by the Firebase Admin SDK.
+      allow create: if isOwner(userId) && validProfileData(request.resource.data);
+      allow update: if isOwner(userId) && validProfileUpdate();
+
+      // Deleting this document would reset the server-managed quota and warnings.
+      // Account deletion is handled by the authenticated server endpoint.
+      allow delete: if false;
+
+      match /{document=**} {
+        allow read, write: if false;
+      }
+    }
+
+    // Only published product updates are public; clients cannot modify them.
+    match /updates/{updateId} {
+      allow get, list: if resource.data.status == 'published';
+      allow create, update, delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

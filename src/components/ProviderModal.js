@@ -23,12 +23,12 @@ const PRESETS = [
     hint: "openrouter.ai üzerinden ücretsiz anahtar al. ':free' etiketli modeller hem metin hem görsel destekler.",
   },
   {
-    label: "Ollama (Bilgisayarında Yerel & Sınırsız AI)",
+    label: "Ollama (Uzak HTTPS Sunucusu)",
     type: "ollama",
-    baseUrl: "http://localhost:11434",
+    baseUrl: "",
     model: "llama3.2",
-    placeholderKey: "Gerekmiyor",
-    hint: "Kendi bilgisayarında Ollama çalışıyorsa API Key gerekmez.",
+    placeholderKey: "Bearer proxy tokeni",
+    hint: "KineticAI sunucusunun erişebildiği, HTTPS kullanan ve Bearer token isteyen bir Ollama proxy adresi girin. localhost ve özel ağ adresleri güvenlik için engellenir.",
   },
   {
     label: "Google Gemini (Kendi API Anahtarın)",
@@ -57,10 +57,10 @@ const PRESETS = [
   {
     label: "Özel / Custom AI Endpoint",
     type: "custom",
-    baseUrl: "http://localhost:8000/predict",
+    baseUrl: "",
     model: "custom-model",
     placeholderKey: "İsteğe bağlı Token",
-    hint: "Kendi eğittiğin modelin veya özel bir sunucunun API adresi.",
+    hint: "Kendi modelinizin herkese açık HTTPS endpoint adresini girin. localhost ve özel ağ adresleri güvenlik için engellenir.",
   },
 ];
 
@@ -269,7 +269,7 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
 
           <div>
             <label className="mb-1.5 block text-xs font-medium opacity-60">
-              API Key {type === "ollama" ? "(Gerekmez)" : "(Doğrulama Zorunlu)"}
+              API Key {type === "ollama" ? "(Proxy tokeni zorunlu)" : type === "custom" ? "(İsteğe bağlı)" : "(Doğrulama zorunlu)"}
             </label>
             <div className="flex gap-2">
               <input
@@ -335,15 +335,17 @@ export default function ProviderModal({ isOpen, onClose, onAdd, darkMode }) {
                   setBaseUrl(e.target.value);
                   resetVerification();
                 }}
+                placeholder={type === "ollama" ? "https://ai.example.com" : type === "custom" ? "https://api.example.com/predict" : "https://api.example.com/v1"}
                 className={`min-h-[44px] w-full rounded-xl border px-3 text-sm outline-none ${inputClass}`}
               />
+              {type === "ollama" && <p className="mt-1.5 text-[11px] opacity-50">Uzak proxy&apos;de Ollama&apos;nın /api/tags ve /api/chat yolları HTTPS üzerinden erişilebilir olmalı.</p>}
             </div>
           )}
 
           {isVerified && (
             <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
               <CheckCircle2 className="h-4 w-4 shrink-0" />
-              <span>API Anahtarı doğrulandı! Güvenle kaydedebilirsin.</span>
+              <span>Bağlantı doğrulandı. Sağlayıcı ayarını kaydedebilirsin.</span>
             </div>
           )}
 

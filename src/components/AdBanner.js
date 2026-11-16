@@ -36,10 +36,10 @@ export default function AdBanner({
       >
         <div className="flex items-center gap-1.5 text-[11px] font-medium opacity-70">
           <Sparkles className="h-3 w-3 text-emerald-400" />
-          <span>KineticAI Sponsor & Destek Alanı</span>
+          <span>Reklam alanı</span>
         </div>
         <p className="mt-1 text-[10px] opacity-45">
-          Proje tamamen ücretsizdir. Destek olmak için reklamlara göz atabilirsiniz.
+          Bu alan, içerik ile reklamın açıkça ayrılması için ayrılmıştır.
         </p>
       </div>
     );

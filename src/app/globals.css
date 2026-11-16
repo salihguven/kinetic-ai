@@ -19,99 +19,30 @@
 
 .theme-light {
   color-scheme: light;
+  --kinetic-surface: #e5e7eb;
+  --kinetic-bg: #dfe2e7;
+  background-color: var(--kinetic-bg);
 }
 
-body {
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
-  overscroll-behavior: none;
+/* Soft light: açık tema tamamen beyaz yerine düşük kontrastlı gri yüzeyler kullanır. */
+.theme-light.bg-zinc-50 { background-color: var(--kinetic-bg) !important; }
+
+.theme-light aside,
+.theme-light header {
+  background-color: #e7e9ed !important;
 }
 
-/* Mobil Çentik / Safe Area Koruması */
-.safe-top {
-  padding-top: env(safe-area-inset-top, 0px);
-}
-.safe-bottom {
-  padding-bottom: env(safe-area-inset-bottom, 0px);
+.theme-light [class~="bg-white"] {
+  background-color: #f0f1f3 !important;
 }
 
-/* Dark modda tarayıcı otomatik doldurmanın beyaz patlamasını engelle */
-.theme-dark input:-webkit-autofill,
-.theme-dark input:-webkit-autofill:hover,
-.theme-dark input:-webkit-autofill:focus {
-  -webkit-text-fill-color: #f4f4f5;
-  -webkit-box-shadow: 0 0 0px 1000px #09090b inset;
-  transition: background-color 5000s ease-in-out 0s;
+.theme-light input,
+.theme-light textarea {
+  background-color: #e8eaee;
 }
 
-/* Mikro-Animasyonlar */
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes scaleIn {
-  from {
-    opacity: 0;
-    transform: scale(0.96);
-  }
-  to {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-.animate-fadeIn {
-  animation: fadeIn 0.22s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-.animate-scaleIn {
-  animation: scaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
-/* Modern Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  background: rgba(113, 113, 122, 0.35);
-  border-radius: 9999px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(113, 113, 122, 0.6);
-}
-
-@import "tailwindcss";
-
-:root {
-  --kinetic-primary: #18181b;
-  --kinetic-accent: #10b981;
-  --kinetic-danger: #ef4444;
-  --kinetic-warning: #f59e0b;
-  --kinetic-surface: #ffffff;
-  --kinetic-bg: #fafafa;
-}
-
-.theme-dark {
-  color-scheme: dark;
-  --kinetic-primary: #ffffff;
-  --kinetic-accent: #10b981;
-  --kinetic-surface: #18181b;
-  --kinetic-bg: #09090b;
-}
-
-.theme-light {
-  color-scheme: light;
-}
+.theme-light [class~="bg-zinc-100"] { background-color: #e1e4e9 !important; }
+.theme-light [class~="bg-zinc-200"] { background-color: #d5d9e0 !important; }
 
 body {
   font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
@@ -252,4 +183,15 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
   padding: 0.25rem 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

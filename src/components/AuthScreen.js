@@ -130,7 +130,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
           <div className="mb-3">
             <KineticLogo size={44} darkMode={darkMode} />
           </div>
-          <h1 className="text-xl font-bold tracking-tight">KineticAI</h1>
+          <h2 className="text-xl font-bold tracking-tight">KineticAI</h2>
           <p className="mt-1 text-xs opacity-60">
             Ücretsiz, açık ve modüler yapay zeka çalışma alanı.
           </p>
@@ -311,7 +311,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
             onClick={() => setIsLegalOpen(true)}
             className="text-[11px] opacity-45 hover:underline hover:opacity-80"
           >
-            Gizlilik Politikası · Kullanım Koşulları · Bireysel Proje Bildirimi
+            Gizlilik Politikası · Kullanım Koşulları · KineticAI by True Kinetic Studios
           </button>
         </div>
       </div>

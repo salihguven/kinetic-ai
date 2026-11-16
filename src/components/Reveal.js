@@ -9,7 +9,7 @@ export default function Reveal({ children, delay = 0, className = "" }) {
 
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
+    if (!el || !("IntersectionObserver" in window)) return;
 
     const observer = new IntersectionObserver(
       ([entry]) => {
@@ -28,7 +28,7 @@ export default function Reveal({ children, delay = 0, className = "" }) {
   return (
     <div
       ref={ref}
-      style={visible ? { animationDelay: `${delay}ms` } : { opacity: 0 }}
+      style={visible ? { animationDelay: `${delay}ms` } : undefined}
       className={`${className} ${visible ? "animate-fadeSlideUp" : ""}`}
     >
       {children}

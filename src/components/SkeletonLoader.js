@@ -5,7 +5,7 @@ export function AppBootSkeleton({ darkMode = true }) {
   const bar = darkMode ? "bg-zinc-800/80" : "bg-zinc-200";
   return (
     <div
-      className={`flex h-screen safe-top safe-bottom ${
+      className={`flex h-dvh safe-top safe-bottom ${
         darkMode ? "bg-zinc-950 text-zinc-100" : "bg-zinc-50 text-zinc-900"
       }`}
     >
