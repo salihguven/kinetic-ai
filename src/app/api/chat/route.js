@@ -7,14 +7,13 @@ import { searchLiveWeb } from "@/lib/webSearch";
 import {
   MAX_STRIKES,
   checkContentModeration,
-  getUserPenaltyStatus,
-  addModerationStrike,
 } from "@/lib/moderation";
 import {
   DAILY_FAIR_LIMIT,
   verifyFirebaseToken,
   getFirestoreUserStatus,
   incrementFirestoreUsage,
+  recordModerationViolation,
 } from "@/lib/firebaseServer";
 
 function buildSmartFallbacks(provider, userFallbacks, hasImages) {
@@ -64,24 +63,22 @@ async function runPreChecks(request, body) {
     return { error: { message: "Devam etmek için lütfen giriş yapın.", status: 401 } };
   }
 
-  const penalty = getUserPenaltyStatus(firebaseUser.uid);
-  if (penalty.blocked) {
-    return {
-      error: {
-        message: `Hesabınız ${penalty.remainingSeconds} saniye boyunca geçici olarak kısıtlandı.`,
-        code: "TEMP_BAN",
-        banUntil: penalty.banUntil,
-        status: 403,
-      },
-    };
-  }
-
-  const status = await getFirestoreUserStatus(firebaseUser.uid, idToken);
+const status = await getFirestoreUserStatus(firebaseUser.uid);
   if (status.banned) {
     return {
       error: { message: `Hesabınız yasaklandı: ${status.banReason}`, code: "BANNED", status: 403 },
     };
   }
+  if (status.moderationBlocked) {
+  return {
+    error: {
+      message: `Hesabınız ${status.remainingSeconds} saniye boyunca geçici olarak kısıtlandı.`,
+      code: "TEMP_BAN",
+      banUntil: status.moderationBanUntil,
+      status: 403,
+    },
+  };
+}
 
   if (status.dailyCount >= DAILY_FAIR_LIMIT) {
     return {
@@ -101,23 +98,34 @@ async function runPreChecks(request, body) {
   }
 
   const lastUserMessage = [...messages].reverse().find((m) => m.role === "user")?.content || "";
-  const modCheck = checkContentModeration(lastUserMessage);
-  if (modCheck.flagged) {
-    const strike = addModerationStrike(firebaseUser.uid, modCheck.reason);
-    if (strike.banned) {
-      return {
-        error: {
-          message: "3 kez uygunsuz dil tespit edildi! Sistem 3 dakika kilitlendi.",
-          code: "TEMP_BAN",
-          banUntil: strike.banUntil,
-          status: 403,
-        },
-      };
-    }
+  
+const modCheck = checkContentModeration(lastUserMessage);
+
+if (modCheck.flagged) {
+  const strike = await recordModerationViolation(
+    firebaseUser.uid,
+    modCheck.reason
+  );
+
+  if (strike.banned) {
     return {
-      error: { message: `Uygunsuz dil! Uyarı ${strike.warnings}/${MAX_STRIKES}`, code: "WARNING", status: 400 },
+      error: {
+        message: "3 kez uygunsuz dil tespit edildi! Sistem 3 dakika kilitlendi.",
+        code: "TEMP_BAN",
+        banUntil: strike.banUntil,
+        status: 403,
+      },
     };
   }
+
+  return {
+    error: {
+      message: `Uygunsuz dil! Uyarı ${strike.warnings}/${MAX_STRIKES}`,
+      code: "WARNING",
+      status: 400,
+    },
+  };
+}
 
   if (!provider || !provider.type) {
     return { error: { message: "Geçerli bir AI bağlantısı seçin.", status: 400 } };
@@ -272,15 +280,7 @@ export async function POST(request) {
     let lastError = null;
     try {
       const reply = await callAIProvider({ provider, messages, systemPrompt: finalSystemPrompt });
-      await incrementFirestoreUsage(firebaseUser.uid, idToken, status.dailyCount);
-      return NextResponse.json({
-        reply,
-        usedProvider: provider.name,
-        usedModel: provider.model,
-        isFallback: false,
-        webSourcesCount,
-        newDailyCount: status.dailyCount + 1,
-      });
+      await incrementFirestoreUsage(firebaseUser.uid);
     } catch (err) {
       console.warn(`[UYARI] ${provider.name} (${provider.model}) başarısız: ${err.message}`);
       lastError = err;
@@ -289,16 +289,7 @@ export async function POST(request) {
     for (const fb of smartFallbacks) {
       if (!fb || !fb.type) continue;
       try {
-        const fbReply = await callAIProvider({ provider: fb, messages, systemPrompt: finalSystemPrompt });
-        await incrementFirestoreUsage(firebaseUser.uid, idToken, status.dailyCount);
-        return NextResponse.json({
-          reply: fbReply,
-          usedProvider: fb.name,
-          usedModel: fb.model,
-          isFallback: true,
-          webSourcesCount,
-          newDailyCount: status.dailyCount + 1,
-        });
+        await incrementFirestoreUsage(firebaseUser.uid);
       } catch (fbErr) {
         console.warn(`[OTO-GEÇİŞ] ${fb.model} de başarısız: ${fbErr.message}`);
         lastError = fbErr;
