@@ -1,3 +1,4 @@
+
 import { NextResponse, connection } from "next/server";
 import {
   verifyFirebaseToken,
@@ -5,9 +6,10 @@ import {
 } from "@/lib/firebaseServer";
 
 export async function GET(request) {
-  try {
-    await connection();
+  // ÖNEMLİ: try bloğunun DIŞINDA olmalı.
+  await connection();
 
+  try {
     const authHeader =
       request.headers.get("authorization") || "";
 
