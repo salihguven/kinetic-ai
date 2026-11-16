@@ -1,5 +1,4 @@
-
-import { NextResponse } from "next/server";
+import { NextResponse, connection } from "next/server";
 import {
   verifyFirebaseToken,
   getFirestoreUserStatus,
@@ -7,6 +6,8 @@ import {
 
 export async function GET(request) {
   try {
+    await connection();
+
     const authHeader =
       request.headers.get("authorization") || "";
 
