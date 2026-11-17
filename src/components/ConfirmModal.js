@@ -14,6 +14,7 @@ export default function ConfirmModal({
   onConfirm,
   onCancel,
   darkMode,
+  zIndexClass = "z-50",
 }) {
   const dialogRef = useRef(null);
   const cancelButtonRef = useRef(null);
@@ -64,7 +65,7 @@ export default function ConfirmModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeIn"
+      className={`fixed inset-0 ${zIndexClass} flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm animate-fadeIn`}
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onCancel?.();
       }}

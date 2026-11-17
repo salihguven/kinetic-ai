@@ -57,6 +57,8 @@ import {
   ChevronDown,
   Settings,
   Brain,
+  Folder,
+  FolderInput,
 } from "lucide-react";
 import KineticLogo from "@/components/KineticLogo";
 import ChatEmptyState from "@/components/ChatEmptyState";
@@ -71,8 +73,17 @@ import ConfirmModal from "@/components/ConfirmModal";
 import PermissionModal from "@/components/PermissionModal";
 import UpdatesModal from "@/components/UpdatesModal";
 import SettingsStudio from "@/components/SettingsStudio";
+import ProjectManagerModal from "@/components/ProjectManagerModal";
 import { AppBootSkeleton, MessageSkeleton } from "@/components/SkeletonLoader";
 import { getReasoningSupport, normalizeReasoningLevel } from "@/lib/reasoning";
+import {
+  DEFAULT_PROJECT_ID,
+  MAX_PROJECTS,
+  normalizeProjectItems,
+  normalizeProjectName,
+  normalizeProjects,
+  moveProjectItems,
+} from "@/lib/workspaceProjects";
 
 const ASSISTANT_PRESETS = {
   general: {
@@ -122,12 +133,13 @@ const BRIDGE_MODES = {
 
 const getCurrentTimestamp = () => Date.now();
 
-function createEmptyChat() {
+function createEmptyChat(projectId = DEFAULT_PROJECT_ID) {
   return {
     id: Date.now().toString() + Math.random().toString(36).slice(2, 6),
     title: "Yeni Sohbet",
     messages: [],
     updatedAt: Date.now(),
+    projectId,
   };
 }
 
@@ -173,6 +185,11 @@ export default function HomeClient() {
   const [providers, setProviders] = useState([]);
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState("");
+  const [projects, setProjects] = useState([{ id: DEFAULT_PROJECT_ID, name: "", createdAt: 0 }]);
+  const [activeProjectId, setActiveProjectId] = useState(DEFAULT_PROJECT_ID);
+  const [projectManagerOpen, setProjectManagerOpen] = useState(false);
+  const [movingChatId, setMovingChatId] = useState("");
+  const [workspaceDataVersion, setWorkspaceDataVersion] = useState(0);
   const [chatSearch, setChatSearch] = useState("");
   const [editingChatId, setEditingChatId] = useState("");
   const [editingChatTitle, setEditingChatTitle] = useState("");
@@ -284,7 +301,12 @@ export default function HomeClient() {
     const timer = window.setTimeout(() => setClockNow(Date.now()), 0);
     return () => window.clearTimeout(timer);
   }, []);
-  const filteredChats = chats.filter((chat) =>
+  const projectChats = chats.filter((chat) => chat.projectId === activeProjectId);
+  const projectChatCounts = Object.fromEntries(projects.map((project) => [
+    project.id,
+    chats.filter((chat) => chat.projectId === project.id).length,
+  ]));
+  const filteredChats = projectChats.filter((chat) =>
     `${chat.title} ${chat.messages?.map((message) => message.content).join(" ") || ""}`
       .toLocaleLowerCase(lang === "tr" ? "tr-TR" : "en-US")
       .includes(normalizedChatSearch)
@@ -376,6 +398,7 @@ export default function HomeClient() {
 
   // 2. Yerel Hafıza (Dil, Tema, Sağlayıcılar, Sohbetler)
   useEffect(() => {
+    let initialProjectId = DEFAULT_PROJECT_ID;
     try {
       const savedLang = localStorage.getItem("kinetic_ai_lang");
       // Restoring browser-only preferences after hydration avoids a server/client markup mismatch.
@@ -418,29 +441,72 @@ export default function HomeClient() {
         }
       }
 
+      let normalizedProjects = [{ id: DEFAULT_PROJECT_ID, name: "", createdAt: 0 }];
+      try {
+        normalizedProjects = normalizeProjects(JSON.parse(localStorage.getItem("kinetic_ai_projects") || "[]"));
+      } catch {
+        // Do not let a malformed project list hide the user's saved chats.
+      }
+      const savedProjectId = localStorage.getItem("kinetic_ai_active_project");
+      initialProjectId = normalizedProjects.some((project) => project.id === savedProjectId)
+        ? savedProjectId
+        : DEFAULT_PROJECT_ID;
+      setProjects(normalizedProjects);
+      setActiveProjectId(initialProjectId);
+
+      for (const key of ["kinetic_ai_notes", "kinetic_ai_tasks"]) {
+        const savedItems = localStorage.getItem(key);
+        if (!savedItems) continue;
+        try {
+          const parsedItems = JSON.parse(savedItems);
+          if (Array.isArray(parsedItems)) {
+            localStorage.setItem(key, JSON.stringify(normalizeProjectItems(parsedItems, normalizedProjects)));
+          }
+        } catch {
+          // Keep malformed local data intact so the user can recover it.
+        }
+      }
+
       const savedChats = localStorage.getItem("kinetic_ai_chats");
       if (savedChats) {
         const parsedChats = JSON.parse(savedChats);
         if (Array.isArray(parsedChats) && parsedChats.length > 0) {
-          setChats(parsedChats);
-          setActiveChatId(parsedChats[0].id);
+          const normalizedChats = normalizeProjectItems(parsedChats, normalizedProjects);
+          setChats(normalizedChats);
+          const firstProjectChat = normalizedChats.find((chat) => chat.projectId === initialProjectId);
+          if (firstProjectChat) setActiveChatId(firstProjectChat.id);
+          else {
+            const initial = createEmptyChat(initialProjectId);
+            setChats([initial, ...normalizedChats]);
+            setActiveChatId(initial.id);
+          }
         } else {
-          const initial = createEmptyChat();
+          const initial = createEmptyChat(initialProjectId);
           setChats([initial]);
           setActiveChatId(initial.id);
         }
       } else {
-        const initial = createEmptyChat();
+        const initial = createEmptyChat(initialProjectId);
         setChats([initial]);
         setActiveChatId(initial.id);
       }
     } catch {
-      const initial = createEmptyChat();
+      const initial = createEmptyChat(initialProjectId);
       setChats([initial]);
       setActiveChatId(initial.id);
     }
     setIsLoaded(true);
   }, []);
+
+  useEffect(() => {
+    if (!isLoaded) return;
+    try {
+      localStorage.setItem("kinetic_ai_projects", JSON.stringify(projects));
+      localStorage.setItem("kinetic_ai_active_project", activeProjectId);
+    } catch {
+      // Project selection remains usable in this session if browser storage is full.
+    }
+  }, [projects, activeProjectId, isLoaded]);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -569,7 +635,7 @@ export default function HomeClient() {
     return () => clearTimeout(timer);
   }, [isLoading]);
 
-  const activeChat = chats.find((c) => c.id === activeChatId) || chats[0];
+  const activeChat = projectChats.find((c) => c.id === activeChatId) || projectChats[0];
   const messages = activeChat?.messages || [];
   const lastMessageLength = messages.at(-1)?.content?.length ?? 0;
   const estimatedChatInputTokens = Math.ceil(
@@ -797,6 +863,144 @@ export default function HomeClient() {
     return data;
   };
 
+  const selectProject = (projectId) => {
+    if (!projects.some((project) => project.id === projectId)) return;
+    setActiveProjectId(projectId);
+    setChatSearch("");
+    setMovingChatId("");
+    setMobileMenuOpen(false);
+    const firstChat = chats.find((chat) => chat.projectId === projectId);
+    if (firstChat) {
+      setActiveChatId(firstChat.id);
+      return;
+    }
+    const newChat = createEmptyChat(projectId);
+    setChats((previous) => [newChat, ...previous]);
+    setActiveChatId(newChat.id);
+  };
+
+  const createProject = (name) => {
+    const normalizedName = normalizeProjectName(name);
+    const duplicate = projects.some((project) => project.name.toLocaleLowerCase("en-US") === normalizedName.toLocaleLowerCase("en-US"));
+    if (duplicate) return { error: lang === "en" ? "A project with that name already exists." : "Bu isimde bir proje zaten var." };
+    if (projects.length >= MAX_PROJECTS) return { error: lang === "en" ? `You can create up to ${MAX_PROJECTS - 1} named projects.` : `En fazla ${MAX_PROJECTS - 1} isimli proje oluşturabilirsin.` };
+
+    const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+    const project = { id, name: normalizedName, createdAt: Date.now() };
+    const nextProjects = [...projects, project];
+    try {
+      localStorage.setItem("kinetic_ai_projects", JSON.stringify(nextProjects));
+    } catch {
+      return { error: lang === "en" ? "The project could not be saved. Free some browser storage and try again." : "Proje kaydedilemedi. Tarayıcı depolama alanını boşaltıp yeniden dene." };
+    }
+
+    const newChat = createEmptyChat(id);
+    setProjects(nextProjects);
+    setActiveProjectId(id);
+    setChats((previous) => [newChat, ...previous]);
+    setActiveChatId(newChat.id);
+    setChatSearch("");
+    setMovingChatId("");
+    return { ok: true };
+  };
+
+  const renameProject = (projectId, name) => {
+    if (projectId === DEFAULT_PROJECT_ID) return { error: lang === "en" ? "General cannot be renamed." : "Genel projesinin adı değiştirilemez." };
+    const normalizedName = normalizeProjectName(name);
+    const duplicate = projects.some((project) => project.id !== projectId && project.name.toLocaleLowerCase("en-US") === normalizedName.toLocaleLowerCase("en-US"));
+    if (duplicate) return { error: lang === "en" ? "A project with that name already exists." : "Bu isimde bir proje zaten var." };
+    const nextProjects = projects.map((project) => project.id === projectId ? { ...project, name: normalizedName, updatedAt: Date.now() } : project);
+    try {
+      localStorage.setItem("kinetic_ai_projects", JSON.stringify(nextProjects));
+    } catch {
+      return { error: lang === "en" ? "The project name could not be saved." : "Proje adı kaydedilemedi." };
+    }
+    setProjects(nextProjects);
+    return { ok: true };
+  };
+
+  const deleteProject = (projectId) => {
+    if (projectId === DEFAULT_PROJECT_ID || !projects.some((project) => project.id === projectId)) return { error: lang === "en" ? "This project cannot be deleted." : "Bu proje silinemez." };
+    const storageKeys = ["kinetic_ai_projects", "kinetic_ai_active_project", "kinetic_ai_chats", "kinetic_ai_notes", "kinetic_ai_tasks"];
+    let previousValues;
+    try {
+      previousValues = Object.fromEntries(storageKeys.map((key) => [key, localStorage.getItem(key)]));
+    } catch {
+      return { error: lang === "en" ? "Browser storage is unavailable, so the project was left unchanged." : "Tarayıcı depolamasına erişilemediği için proje değiştirilmedi." };
+    }
+    const nextProjects = projects.filter((project) => project.id !== projectId);
+    const nextChats = moveProjectItems(chats, projectId, DEFAULT_PROJECT_ID);
+    const readArray = (key) => {
+      const raw = previousValues[key];
+      if (raw === null) return [];
+      const value = JSON.parse(raw);
+      if (!Array.isArray(value)) throw new Error("Invalid stored list");
+      return value;
+    };
+
+    try {
+      const nextNotes = moveProjectItems(readArray("kinetic_ai_notes"), projectId, DEFAULT_PROJECT_ID);
+      const nextTasks = moveProjectItems(readArray("kinetic_ai_tasks"), projectId, DEFAULT_PROJECT_ID);
+      const storedChats = nextChats.map((chat) => ({
+        ...chat,
+        messages: (chat.messages || []).map((message) => ({
+          role: message.role,
+          content: message.content,
+          providerName: message.providerName,
+          attachmentNames: message.attachmentNames,
+          sources: message.sources,
+        })),
+      }));
+      localStorage.setItem("kinetic_ai_chats", JSON.stringify(storedChats));
+      localStorage.setItem("kinetic_ai_notes", JSON.stringify(nextNotes));
+      localStorage.setItem("kinetic_ai_tasks", JSON.stringify(nextTasks));
+      localStorage.setItem("kinetic_ai_projects", JSON.stringify(nextProjects));
+      const nextActiveProjectId = activeProjectId === projectId ? DEFAULT_PROJECT_ID : activeProjectId;
+      localStorage.setItem("kinetic_ai_active_project", nextActiveProjectId);
+      setChats(nextChats);
+      setProjects(nextProjects);
+      setWorkspaceDataVersion((version) => version + 1);
+      if (activeProjectId === projectId) {
+        setActiveProjectId(DEFAULT_PROJECT_ID);
+        const defaultChat = nextChats.find((chat) => chat.projectId === DEFAULT_PROJECT_ID) || createEmptyChat(DEFAULT_PROJECT_ID);
+        if (!nextChats.some((chat) => chat.id === defaultChat.id)) setChats((previous) => [defaultChat, ...previous]);
+        setActiveChatId(defaultChat.id);
+      }
+      return { ok: true };
+    } catch {
+      for (const key of storageKeys) {
+        try {
+          if (previousValues[key] === null) localStorage.removeItem(key);
+          else localStorage.setItem(key, previousValues[key]);
+        } catch {
+          // Best-effort rollback if browser storage becomes unavailable mid-write.
+        }
+      }
+      return { error: lang === "en" ? "Project data could not be moved. Nothing was deleted; check browser storage and try again." : "Proje verileri taşınamadı. Hiçbir şey silinmedi; tarayıcı depolamasını kontrol edip yeniden dene." };
+    }
+  };
+
+  const moveChat = (chatId, projectId) => {
+    if (!projects.some((project) => project.id === projectId)) return;
+    const chat = chats.find((item) => item.id === chatId);
+    if (!chat || chat.projectId === projectId) {
+      setMovingChatId("");
+      return;
+    }
+    const nextChats = chats.map((item) => item.id === chatId ? { ...item, projectId, updatedAt: Date.now() } : item);
+    setChats(nextChats);
+    setMovingChatId("");
+    if (activeChatId === chatId && projectId !== activeProjectId) {
+      const nextActiveChat = nextChats.find((item) => item.projectId === activeProjectId);
+      if (nextActiveChat) setActiveChatId(nextActiveChat.id);
+      else {
+        const fresh = createEmptyChat(activeProjectId);
+        setChats((previous) => [fresh, ...previous]);
+        setActiveChatId(fresh.id);
+      }
+    }
+  };
+
   const handleNewChat = () => {
     if (isLoading) return;
     triggerHaptic("light");
@@ -806,7 +1010,7 @@ export default function HomeClient() {
       setErrorMsg("");
       return;
     }
-    const newChat = createEmptyChat();
+    const newChat = createEmptyChat(activeProjectId);
     setChats((prev) => [newChat, ...prev]);
     chatAtBottomRef.current = true;
     setShowScrollToBottom(false);
@@ -826,9 +1030,10 @@ export default function HomeClient() {
       danger: true,
       onConfirm: () => {
         const filtered = chats.filter((c) => c.id !== id);
-        if (filtered.length === 0) {
-          const fresh = createEmptyChat();
-          setChats([fresh]);
+        const remainingInProject = filtered.filter((chat) => chat.projectId === activeProjectId);
+        if (remainingInProject.length === 0) {
+          const fresh = createEmptyChat(activeProjectId);
+          setChats([fresh, ...filtered]);
           chatAtBottomRef.current = true;
           setShowScrollToBottom(false);
           setActiveChatId(fresh.id);
@@ -837,7 +1042,7 @@ export default function HomeClient() {
           if (activeChatId === id) {
             chatAtBottomRef.current = true;
             setShowScrollToBottom(false);
-            setActiveChatId(filtered[0].id);
+            setActiveChatId(remainingInProject[0].id);
           }
         }
         setConfirmState({ open: false });
@@ -1495,11 +1700,11 @@ export default function HomeClient() {
         >
           <button
             onClick={() => switchTab("chat")}
-            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition ${activeTab === "chat"
+            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition-colors ${activeTab === "chat"
                 ? darkMode
-                  ? "bg-zinc-800 text-white"
+                  ? "bg-zinc-800 text-white shadow-sm"
                   : "bg-white text-zinc-900 shadow-sm"
-                : "opacity-60 hover:opacity-100"
+                : darkMode ? "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100" : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
               }`}
           >
             <MessageSquare className="h-3.5 w-3.5" />
@@ -1507,11 +1712,11 @@ export default function HomeClient() {
           </button>
           <button
             onClick={() => switchTab("notebook")}
-            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition ${activeTab === "notebook"
+            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition-colors ${activeTab === "notebook"
                 ? darkMode
-                  ? "bg-zinc-800 text-white"
+                  ? "bg-zinc-800 text-white shadow-sm"
                   : "bg-white text-zinc-900 shadow-sm"
-                : "opacity-60 hover:opacity-100"
+                : darkMode ? "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100" : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
               }`}
           >
             <BookOpen className="h-3.5 w-3.5" />
@@ -1519,11 +1724,11 @@ export default function HomeClient() {
           </button>
           <button
             onClick={() => switchTab("tasks")}
-            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition ${activeTab === "tasks"
+            className={`flex min-h-12 items-center justify-center gap-1 rounded-lg transition-colors ${activeTab === "tasks"
                 ? darkMode
-                  ? "bg-zinc-800 text-white"
+                  ? "bg-zinc-800 text-white shadow-sm"
                   : "bg-white text-zinc-900 shadow-sm"
-                : "opacity-60 hover:opacity-100"
+                : darkMode ? "text-zinc-400 hover:bg-zinc-800/60 hover:text-zinc-100" : "text-zinc-600 hover:bg-white/80 hover:text-zinc-900"
               }`}
           >
             <CheckSquare className="h-3.5 w-3.5" />
@@ -1535,7 +1740,7 @@ export default function HomeClient() {
         <div className="mb-3 grid grid-cols-2 gap-2">
           <button
             onClick={handleNewChat}
-            className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-medium transition ${darkMode
+            className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl border px-3 text-xs font-semibold transition-colors active:scale-[0.98] ${darkMode
                 ? "border-zinc-800 bg-zinc-950/60 hover:bg-zinc-800"
                 : "border-zinc-300 bg-zinc-50 hover:bg-zinc-100"
               }`}
@@ -1548,7 +1753,7 @@ export default function HomeClient() {
               triggerHaptic("light");
               setIsModalOpen(true);
             }}
-            className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-medium transition ${darkMode
+            className={`flex min-h-12 items-center justify-center gap-1.5 rounded-xl px-3 text-xs font-semibold transition-colors active:scale-[0.98] ${darkMode
                 ? "bg-white text-zinc-950 hover:bg-zinc-200"
                 : "bg-zinc-900 text-white hover:bg-zinc-800"
               }`}
@@ -1558,45 +1763,50 @@ export default function HomeClient() {
           </button>
         </div>
 
-        {/* AKTİF MODEL SEÇİCİ */}
-        <div className="mb-3">
-          <div className="mb-1 flex min-h-9 items-center px-1">
-            <label className="block px-1 text-[10px] font-semibold uppercase tracking-wider opacity-45">
-              {t.activeAI}
-            </label>
-          </div>
-          {providers.length === 0 ? (
+        <section className="mb-3 shrink-0" aria-labelledby="sidebar-projects-title">
+          <div className="mb-1 flex min-h-9 items-center justify-between px-1">
+            <h2 id="sidebar-projects-title" className="text-[11px] font-semibold opacity-60">
+              {lang === "en" ? "Projects" : "Projeler"}
+            </h2>
             <button
-              onClick={() => setIsModalOpen(true)}
-              className="flex min-h-12 w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-emerald-500/40 bg-emerald-500/10 px-3 text-xs font-medium text-emerald-400 hover:bg-emerald-500/20"
+              type="button"
+              onClick={() => setProjectManagerOpen(true)}
+              className={`flex h-9 w-9 items-center justify-center rounded-lg transition ${darkMode ? "hover:bg-zinc-800" : "hover:bg-zinc-100"}`}
+              aria-label={lang === "en" ? "Create or manage projects" : "Proje oluştur veya yönet"}
+              title={lang === "en" ? "Create or manage projects" : "Proje oluştur veya yönet"}
             >
-              <Plus className="h-3.5 w-3.5" />
-              {t.noModelsCta}
+              <Plus className="h-4 w-4" />
             </button>
-          ) : (
-            <CustomSelect
-              value={activeProviderId}
-              onChange={(val) => {
-                triggerHaptic("light");
-                setActiveProviderId(val);
-              }}
-              darkMode={darkMode}
-              options={providers.map((p) => ({
-                value: p.id,
-                label: p.name,
-                sublabel: p.model,
-              }))}
-            />
-          )}
-        </div>
+          </div>
+          <div className="max-h-32 space-y-0.5 overflow-y-auto overscroll-contain pr-1">
+            {projects.map((project) => {
+              const isActiveProject = project.id === activeProjectId;
+              return (
+                <button
+                  key={project.id}
+                  type="button"
+                  onClick={() => selectProject(project.id)}
+                  aria-pressed={isActiveProject}
+                  className={`flex min-h-11 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-xs transition ${isActiveProject
+                    ? darkMode ? "bg-zinc-800 text-white" : "bg-zinc-200 text-zinc-900"
+                    : "opacity-70 hover:bg-zinc-800/35 hover:opacity-100"
+                    }`}
+                >
+                  <Folder className={`h-4 w-4 shrink-0 ${isActiveProject ? "text-emerald-400" : "opacity-65"}`} />
+                  <span className="min-w-0 flex-1 truncate">{project.id === DEFAULT_PROJECT_ID ? (lang === "en" ? "General" : "Genel") : project.name}</span>
+                  {isActiveProject && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-400" aria-hidden="true" />}
+                </button>
+              );
+            })}
+          </div>
+        </section>
 
         {/* Sohbet geçmişi */}
-        <div className={`mb-2 flex min-h-10 items-center justify-between border-b px-2 pb-2 text-[11px] font-medium ${darkMode ? "border-zinc-800/50" : "border-zinc-200"}`}>
+        <div className={`mb-2 flex min-h-9 items-center border-b px-2 pb-1 text-[11px] font-medium ${darkMode ? "border-zinc-800/50" : "border-zinc-200"}`}>
           <span>{t.chatHistory}</span>
-          <span className="rounded-full bg-zinc-500/10 px-2 py-0.5 text-[10px] opacity-60">{chats.length}</span>
         </div>
 
-        {chats.length > 0 && (
+        {projectChats.length > 3 && (
           <label className={`mb-2 flex min-h-12 items-center gap-2 rounded-lg border px-2.5 ${darkMode ? "border-zinc-800 bg-zinc-950/50" : "border-zinc-300 bg-zinc-50"}`}>
             <Search className="h-3.5 w-3.5 shrink-0 opacity-45" />
             <input
@@ -1611,20 +1821,23 @@ export default function HomeClient() {
         )}
 
         {/* TAM BOY FERAH LİSTE ALANI */}
-        <div className="mb-3 min-h-0 flex-1 divide-y divide-zinc-800/30 overflow-y-auto overscroll-contain pr-1">
+        <div className="mb-3 min-h-0 flex-1 space-y-1.5 overflow-y-auto overscroll-contain pr-1">
           <>
             {filteredChats.map((chat) => {
               const isCurrent = chat.id === activeChat?.id && activeTab === "chat";
               return (
                 <div
                   key={chat.id}
-                  className={`group flex min-h-16 items-center justify-between gap-1 rounded-lg px-1.5 py-1 text-xs transition ${isCurrent
+                  className={`group min-h-16 rounded-xl px-2 py-1.5 text-xs transition-colors ${isCurrent
                       ? darkMode
-                        ? "bg-zinc-800/80 text-white"
-                        : "bg-zinc-200/80 text-zinc-900 font-medium"
-                      : "opacity-75 hover:bg-zinc-800/30 hover:opacity-100"
+                        ? "bg-zinc-800/85 text-white"
+                        : "bg-zinc-200/90 text-zinc-900 font-medium"
+                      : darkMode
+                        ? "bg-zinc-800/25 text-zinc-300 hover:bg-zinc-800/60 hover:text-zinc-100"
+                        : "bg-zinc-100/80 text-zinc-700 hover:bg-zinc-200/80 hover:text-zinc-900"
                     }`}
                 >
+                  <div className="flex items-center justify-between gap-1">
                   <div className="min-w-0 flex-1">
                     {editingChatId === chat.id ? (
                       <input
@@ -1664,26 +1877,54 @@ export default function HomeClient() {
                     )}
                   </div>
                   {editingChatId !== chat.id && (
-                    <button
-                      type="button"
-                      onClick={(event) => beginRenameChat(event, chat)}
-                      className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-55 transition hover:bg-emerald-500/10 hover:text-emerald-500 group-hover:opacity-100"
-                      aria-label={lang === "en" ? `Rename ${chat.title}` : `${chat.title} sohbetini yeniden adlandır`}
-                      title={lang === "en" ? "Rename chat" : "Sohbeti yeniden adlandır"}
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                    <div className="flex w-[168px] shrink-0 items-center justify-between md:w-36">
+                      <button
+                        type="button"
+                        onClick={() => setMovingChatId((current) => current === chat.id ? "" : chat.id)}
+                        className={`sidebar-chat-action flex shrink-0 items-center justify-center rounded-lg transition-colors md:opacity-70 md:group-hover:opacity-100 ${darkMode ? "text-zinc-400 hover:bg-emerald-500/10 hover:text-emerald-400" : "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-700"}`}
+                        aria-label={lang === "en" ? `Move ${chat.title} to another project` : `${chat.title} sohbetini başka projeye taşı`}
+                        title={lang === "en" ? "Move to project" : "Projeye taşı"}
+                      >
+                        <FolderInput className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={(event) => beginRenameChat(event, chat)}
+                        className={`sidebar-chat-action flex shrink-0 items-center justify-center rounded-lg transition-colors md:opacity-70 md:group-hover:opacity-100 ${darkMode ? "text-zinc-400 hover:bg-emerald-500/10 hover:text-emerald-400" : "text-zinc-500 hover:bg-emerald-500/10 hover:text-emerald-700"}`}
+                        aria-label={lang === "en" ? `Rename ${chat.title}` : `${chat.title} sohbetini yeniden adlandır`}
+                        title={lang === "en" ? "Rename chat" : "Sohbeti yeniden adlandır"}
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          requestDeleteChat(chat.id);
+                        }}
+                        className={`sidebar-chat-action flex shrink-0 items-center justify-center rounded-lg transition-colors md:opacity-70 md:group-hover:opacity-100 ${darkMode ? "text-zinc-400 hover:bg-red-500/10 hover:text-red-400" : "text-zinc-500 hover:bg-red-500/10 hover:text-red-700"}`}
+                        aria-label={`${t.deleteChat}: ${chat.title}`}
+                        title={lang === "en" ? "Delete chat" : "Sohbeti sil"}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   )}
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      requestDeleteChat(chat.id);
-                    }}
-                    className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-55 transition hover:bg-red-500/10 hover:text-red-400 group-hover:opacity-100"
-                    aria-label={`${t.deleteChat}: ${chat.title}`}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  </div>
+                  {movingChatId === chat.id && (
+                    <div className="flex flex-wrap gap-1 border-t border-zinc-500/15 pt-1.5">
+                      {projects.map((project) => (
+                        <button
+                          key={project.id}
+                          type="button"
+                          disabled={chat.projectId === project.id}
+                          onClick={() => moveChat(chat.id, project.id)}
+                          className="min-h-9 rounded-lg px-2 text-[10px] text-emerald-400 hover:bg-emerald-500/10 disabled:cursor-default disabled:text-zinc-500"
+                        >
+                          {project.id === DEFAULT_PROJECT_ID ? (lang === "en" ? "General" : "Genel") : project.name}
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -1697,7 +1938,7 @@ export default function HomeClient() {
               </div>
             )}
             </>
-          {chats.length === 0 && (
+          {projectChats.length === 0 && (
             <div className="rounded-xl border border-dashed border-zinc-700/50 p-4 text-center">
               <MessageSquare className="mx-auto mb-2 h-5 w-5 opacity-50" aria-hidden="true" />
               <p className="text-xs opacity-65">{lang === "en" ? "Your chats will appear here." : "Sohbetlerin burada görünecek."}</p>
@@ -1736,6 +1977,9 @@ export default function HomeClient() {
               <button role="menuitem" onClick={() => { setIsTutorOpen(true); setAccountMenuOpen(false); closeMobileMenu(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
                 <HelpCircle className="h-4 w-4 opacity-70" />{lang === "en" ? "Help and guide" : "Yardım ve rehber"}
               </button>
+              <button role="menuitem" onClick={() => { setIsLegalOpen(true); setAccountMenuOpen(false); closeMobileMenu(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs transition hover:bg-zinc-800/10">
+                <Scale className="h-4 w-4 opacity-70" />{t.legal}
+              </button>
               <div className={`my-1 border-t ${darkMode ? "border-zinc-700" : "border-zinc-200"}`} />
               <button role="menuitem" onClick={() => { setAccountMenuOpen(false); requestLogout(); }} className="flex min-h-12 w-full items-center gap-3 rounded-xl px-3 text-left text-xs text-red-400 transition hover:bg-red-500/10">
                 <LogOut className="h-4 w-4" />{lang === "en" ? "Sign out" : "Oturumu kapat"}
@@ -1768,13 +2012,6 @@ export default function HomeClient() {
             {t.updates}
           </button>
 
-          <button
-            onClick={() => setIsLegalOpen(true)}
-            className="flex min-h-12 w-full items-center justify-center gap-1 text-xs opacity-60 hover:underline hover:opacity-90"
-          >
-            <Scale className="h-3 w-3" />
-            {t.legal}
-          </button>
           <p className="pb-1 text-center text-[9px] opacity-35">KineticAI by True Kinetic Studios</p>
         </div>
       </aside>
@@ -1998,6 +2235,9 @@ export default function HomeClient() {
         {activeTab === "notebook" && (
           <div className="flex-1 overflow-hidden">
             <NotebookStudio
+              key={`${activeProjectId}-${workspaceDataVersion}`}
+              activeProjectId={activeProjectId}
+              projects={projects}
               activeProvider={activeProvider}
               onAskAI={runAIRequest}
               darkMode={darkMode}
@@ -2010,6 +2250,9 @@ export default function HomeClient() {
         {activeTab === "tasks" && (
           <div className="flex-1 overflow-y-auto">
             <TaskManager
+              key={`${activeProjectId}-${workspaceDataVersion}`}
+              activeProjectId={activeProjectId}
+              projects={projects}
               activeProvider={activeProvider}
               onAskAI={runAIRequest}
               darkMode={darkMode}
@@ -2585,6 +2828,20 @@ export default function HomeClient() {
         onConfirm={confirmState.onConfirm}
         onCancel={() => setConfirmState({ open: false })}
         darkMode={darkMode}
+      />
+
+      <ProjectManagerModal
+        isOpen={projectManagerOpen}
+        onClose={() => setProjectManagerOpen(false)}
+        projects={projects}
+        activeProjectId={activeProjectId}
+        chatCounts={projectChatCounts}
+        lang={lang}
+        darkMode={darkMode}
+        onCreate={createProject}
+        onRename={renameProject}
+        onDelete={deleteProject}
+        onSelect={selectProject}
       />
     </div>
   );

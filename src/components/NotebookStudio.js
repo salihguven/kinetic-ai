@@ -14,6 +14,7 @@ import {
   Check,
   Upload,
   X,
+  FolderInput,
 } from "lucide-react";
 import MarkdownMessage from "./MarkdownMessage";
 import { MessageSkeleton } from "./SkeletonLoader";
@@ -30,7 +31,7 @@ import {
 } from "@/lib/sourceLimits";
 import { getReasoningSupport } from "@/lib/reasoning";
 
-export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang = "tr", reasoningLevel = "auto" }) {
+export default function NotebookStudio({ activeProjectId = "default", projects = [], activeProvider, onAskAI, darkMode, lang = "tr", reasoningLevel = "auto" }) {
   const [sources, setSources] = useState([]);
   const [noteTitle, setNoteTitle] = useState("");
   const [noteText, setNoteText] = useState("");
@@ -42,10 +43,12 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
   const [error, setError] = useState("");
   const [sourcesLoaded, setSourcesLoaded] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [movingSourceId, setMovingSourceId] = useState("");
 
   const fileRef = useRef(null);
   const requestAbortRef = useRef(null);
   const t = TRANSLATIONS[lang] || TRANSLATIONS.tr;
+  const projectSources = sources.filter((source) => source.projectId === activeProjectId);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -136,6 +139,7 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
             title: f.name,
             content,
             sourceKind: "file",
+            projectId: activeProjectId,
             fileSizeBytes: f.size,
             contentBytes: metrics.bytes,
             active: true,
@@ -177,10 +181,11 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
     }
     setSources((prev) => [
       {
-        id: Date.now().toString(),
+        id: Date.now().toString() + Math.random().toString(36).slice(2, 7),
         title: noteTitle.trim(),
         content: text,
         sourceKind: "text",
+        projectId: activeProjectId,
         contentBytes: metrics.bytes,
         active: true,
       },
@@ -191,7 +196,7 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
     setShowAddForm(false);
   };
 
-  const activeSources = sources.filter((s) => s.active);
+  const activeSources = projectSources.filter((s) => s.active);
   const sourceCharacters = activeSources.reduce((sum, source) => sum + getTextMetrics(source.content).characters, 0);
   const sourceTokensEstimate = Math.ceil(sourceCharacters / 4);
   const questionTokens = Math.max(1, Math.ceil(getTextMetrics(question).characters / 4));
@@ -303,7 +308,7 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
           <div className="flex items-center gap-2">
             <BookOpen className="h-4 w-4 text-emerald-400" />
             <h2 className="text-sm font-semibold">
-              {t.notesSources} <span className="opacity-50">({activeSources.length}/{sources.length})</span>
+              {t.notesSources} <span className="opacity-50">({activeSources.length}/{projectSources.length})</span>
             </h2>
           </div>
           <div className="flex gap-1.5">
@@ -391,7 +396,7 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
         )}
 
         <div className="flex-1 divide-y divide-zinc-800/40 overflow-y-auto pr-1">
-          {sources.length === 0 ? (
+          {projectSources.length === 0 ? (
             <div className="flex min-h-56 flex-col items-center justify-center rounded-xl border border-dashed border-zinc-700/50 p-5 text-center">
               <BookOpen className="mb-3 h-8 w-8 text-emerald-400" aria-hidden="true" />
               <h3 className="text-sm font-semibold">{t.noSourcesTitle}</h3>
@@ -406,11 +411,12 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
               </div>
             </div>
           ) : (
-            sources.map((s) => (
+            projectSources.map((s) => (
               <div
                 key={s.id}
-                className="group flex items-center justify-between gap-2 py-2.5 text-xs transition"
+                className="group py-2.5 text-xs transition"
               >
+                <div className="flex items-center justify-between gap-2">
                 <button
                   onClick={() =>
                     setSources((prev) =>
@@ -448,12 +454,40 @@ export default function NotebookStudio({ activeProvider, onAskAI, darkMode, lang
                   </div>
                 </button>
                 <button
+                  type="button"
+                  onClick={() => setMovingSourceId((current) => current === s.id ? "" : s.id)}
+                  className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-60 transition hover:bg-emerald-500/10 hover:text-emerald-400 hover:opacity-100"
+                  aria-label={lang === "en" ? `Move ${s.title} to another project` : `${s.title} kaynağını başka projeye taşı`}
+                  title={lang === "en" ? "Move to project" : "Projeye taşı"}
+                >
+                  <FolderInput className="h-3.5 w-3.5" />
+                </button>
+                <button
                   onClick={() => setPendingDelete(s)}
                   className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-60 transition hover:bg-red-500/10 hover:text-red-400 hover:opacity-100"
                   aria-label={`${t.deleteSourceTitle} ${s.title}`}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
+                </div>
+                {movingSourceId === s.id && (
+                  <div className="mt-1 flex flex-wrap gap-1 border-t border-zinc-500/15 pt-1.5">
+                    {projects.map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        disabled={s.projectId === project.id}
+                        onClick={() => {
+                          setSources((previous) => previous.map((source) => source.id === s.id ? { ...source, projectId: project.id } : source));
+                          setMovingSourceId("");
+                        }}
+                        className="min-h-9 rounded-lg px-2 text-[10px] text-emerald-400 hover:bg-emerald-500/10 disabled:cursor-default disabled:text-zinc-500"
+                      >
+                        {project.id === "default" ? (lang === "en" ? "General" : "Genel") : project.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))
           )}

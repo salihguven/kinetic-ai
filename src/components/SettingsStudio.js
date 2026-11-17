@@ -1,10 +1,11 @@
 "use client";
 
 import {
-  BarChart3, Bell, Check, ChevronRight, Cloud, FolderKanban, Globe, Link2, Moon,
-  ShieldCheck, Smartphone, Sparkles, Sun, UserRound, WandSparkles,
+  BarChart3, Bell, Check, ChevronRight, Cloud, Globe, Link2, Moon,
+  ShieldCheck, Smartphone, Sparkles, Sun, UserRound,
 } from "lucide-react";
 import QuotaCard from "@/components/QuotaCard";
+import EncryptedBackupCard from "@/components/EncryptedBackupCard";
 
 export default function SettingsStudio({
   lang = "tr", darkMode, setDarkMode, setLang, notificationsEnabled,
@@ -23,32 +24,18 @@ export default function SettingsStudio({
         : "Kurulum, ekran düzeni ve bildirim desteği geliştirilmiş özel Android deneyimi.",
     },
     {
-      icon: WandSparkles,
-      title: isEn ? "Provider setup guides" : "Sağlayıcı kurulum rehberi",
-      description: isEn
-        ? "Step-by-step API key setup with provider pricing and free-tier notes."
-        : "Her AI sağlayıcısı için API anahtarı alma, ücret ve ücretsiz katman bilgileri.",
-    },
-    {
-      icon: FolderKanban,
-      title: isEn ? "Projects and folders" : "Projeler ve klasörler",
-      description: isEn
-        ? "Group chats, notes and tasks by project."
-        : "Sohbetleri, notları ve görevleri proje başlıklarında düzenleme.",
-    },
-    {
       icon: BarChart3,
-      title: isEn ? "Usage reports and model comparison" : "Kullanım raporu ve model kıyası",
+      title: isEn ? "Usage history and cost insights" : "Kullanım geçmişi ve maliyet görünümü",
       description: isEn
-        ? "Richer model comparisons and provider-reported cost insights."
-        : "Daha ayrıntılı model karşılaştırması ve sağlayıcının bildirdiği maliyet görünümü.",
+        ? "Multi-day trends and comparable costs where providers expose reliable pricing data."
+        : "Sağlayıcı güvenilir fiyat verisi sunduğunda çok günlük eğilimler ve karşılaştırmalı maliyetler.",
     },
     {
       icon: Cloud,
-      title: isEn ? "Encrypted sync and backup" : "Şifreli eşitleme ve yedekleme",
+      title: isEn ? "Cross-device encrypted sync" : "Cihazlar arası şifreli eşitleme",
       description: isEn
-        ? "Optional cross-device sync with clear data controls."
-        : "Veri kontrolü kullanıcıda kalacak şekilde isteğe bağlı cihazlar arası eşitleme.",
+        ? "Optional sync across devices with clear data controls. Encrypted file backup is available below."
+        : "Veri kontrolü sende kalacak şekilde isteğe bağlı cihaz eşitleme. Şifreli dosya yedeği aşağıda kullanılabilir.",
     },
   ];
   return (
@@ -130,6 +117,8 @@ export default function SettingsStudio({
           </div>
         </div>
 
+        <EncryptedBackupCard darkMode={darkMode} lang={lang} />
+
         <section className={card} aria-labelledby="settings-token-guide">
           <h3 id="settings-token-guide" className="text-sm font-semibold">{isEn ? "What changes token use?" : "Token kullanımı neye göre artar?"}</h3>
           <p className={"mt-1 text-xs leading-relaxed " + subtext}>
@@ -185,6 +174,15 @@ export default function SettingsStudio({
             {isEn ? "These features are not available in the current beta." : "Bu özellikler mevcut beta sürümünde kullanıma açık değildir."}
           </p>
         </section>
+
+        <p className={`flex items-start gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-[11px] leading-relaxed ${subtext}`}>
+          <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-500" />
+          <span>
+            {isEn
+              ? "Available now: organize chats, notes and tasks with Projects, follow provider-reported daily token usage by model, and create encrypted local backups. API setup guides are inside Add API connection."
+              : "Şimdi kullanılabilir: Sohbet, not ve görevlerini Projeler ile düzenle, sağlayıcının bildirdiği günlük token kullanımını model bazında gör ve şifreli yerel yedek oluştur. API kurulum rehberleri bağlantı ekleme ekranında."}
+          </span>
+        </p>
       </div>
     </section>
   );

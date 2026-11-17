@@ -11,12 +11,13 @@ import {
   Loader2,
   Flag,
   ListTodo,
+  FolderInput,
 } from "lucide-react";
 import ConfirmModal from "./ConfirmModal";
 import { TRANSLATIONS } from "@/lib/i18n";
 import { formatFriendlyError } from "@/lib/uxHelpers";
 
-export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = "tr", reasoningLevel = "auto" }) {
+export default function TaskManager({ activeProjectId = "default", projects = [], activeProvider, onAskAI, darkMode, lang = "tr", reasoningLevel = "auto" }) {
   const [tasks, setTasks] = useState([]);
   const [newTitle, setNewTitle] = useState("");
   const [priority, setPriority] = useState("medium");
@@ -26,10 +27,12 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
   const [filter, setFilter] = useState("all");
   const [tasksLoaded, setTasksLoaded] = useState(false);
   const [pendingDelete, setPendingDelete] = useState(null);
+  const [movingTaskId, setMovingTaskId] = useState("");
   const goalInputRef = useRef(null);
   const taskInputRef = useRef(null);
   const aiAbortRef = useRef(null);
   const t = TRANSLATIONS[lang] || TRANSLATIONS.tr;
+  const projectTasks = tasks.filter((task) => task.projectId === activeProjectId);
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => {
@@ -68,6 +71,7 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
         title: newTitle.trim(),
         priority,
         done: false,
+        projectId: activeProjectId,
       },
       ...prev,
     ]);
@@ -133,6 +137,7 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
         title: String(t),
         priority: "medium",
         done: false,
+        projectId: activeProjectId,
       }));
 
       if (generated.length === 0) {
@@ -158,13 +163,13 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
     }
   };
 
-  const filteredTasks = tasks.filter((t) => {
+  const filteredTasks = projectTasks.filter((t) => {
     if (filter === "active") return !t.done;
     if (filter === "done") return t.done;
     return true;
   });
 
-  const completedCount = tasks.filter((t) => t.done).length;
+  const completedCount = projectTasks.filter((t) => t.done).length;
   const estimatedPlanInputTokens = Math.ceil((goalInput.length + (lang === "en" ? 190 : 210)) / 4);
   const optClass = darkMode ? "bg-zinc-950 text-zinc-100" : "bg-white text-zinc-900";
   const boxClass = darkMode
@@ -217,7 +222,7 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
           <div>
             <h2 className="text-base font-semibold">{t.taskManagerTitle}</h2>
             <p className="text-xs opacity-55">
-              {completedCount} / {tasks.length} {t.tasksCompleted}
+              {completedCount} / {projectTasks.length} {t.tasksCompleted}
             </p>
           </div>
 
@@ -280,12 +285,12 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
             <div className="flex min-h-56 flex-col items-center justify-center px-4 py-10 text-center">
               <ListTodo className="mb-3 h-8 w-8 text-emerald-400" aria-hidden="true" />
               <h3 className="text-sm font-semibold">
-                {tasks.length === 0 ? t.noTasksTitle : t.noFilteredTasks}
+                {projectTasks.length === 0 ? t.noTasksTitle : t.noFilteredTasks}
               </h3>
               <p className="mt-1 max-w-sm text-xs leading-relaxed opacity-65">
-                {tasks.length === 0 ? t.noTasksDesc : t.noFilteredTasks}
+                {projectTasks.length === 0 ? t.noTasksDesc : t.noFilteredTasks}
               </p>
-              {tasks.length === 0 ? (
+              {projectTasks.length === 0 ? (
                 <button type="button" onClick={() => taskInputRef.current?.focus()} className="mt-3 inline-flex min-h-12 items-center gap-2 rounded-xl bg-emerald-500 px-4 text-xs font-semibold text-zinc-950 hover:bg-emerald-400">
                   <Plus className="h-4 w-4" />{t.addTask}
                 </button>
@@ -299,10 +304,11 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
             filteredTasks.map((t) => (
               <div
                 key={t.id}
-                className={`group flex items-center justify-between gap-3 py-3 text-xs transition ${
+                className={`group py-3 text-xs transition ${
                   t.done ? "opacity-50" : ""
                 }`}
               >
+                <div className="flex items-center justify-between gap-3">
                 <button
                   onClick={() =>
                     setTasks((prev) =>
@@ -346,6 +352,16 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
                       : t.priorityLow}
                   </span>
                   <button
+                    type="button"
+                    onClick={() => setMovingTaskId((current) => current === t.id ? "" : t.id)}
+                    className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-60 transition hover:bg-emerald-500/10 hover:text-emerald-400 hover:opacity-100"
+                    aria-label={lang === "en" ? `Move ${t.title} to another project` : `${t.title} görevini başka projeye taşı`}
+                    title={lang === "en" ? "Move to project" : "Projeye taşı"}
+                  >
+                    <FolderInput className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => setPendingDelete(t)}
                     className="touch-target flex shrink-0 items-center justify-center rounded-lg opacity-60 transition hover:bg-red-500/10 hover:text-red-400 hover:opacity-100"
                     aria-label={`${t.deleteTaskTitle} ${t.title}`}
@@ -353,6 +369,25 @@ export default function TaskManager({ activeProvider, onAskAI, darkMode, lang = 
                     <Trash2 className="h-3.5 w-3.5" />
                   </button>
                 </div>
+                {movingTaskId === t.id && (
+                  <div className="mt-1 flex flex-wrap gap-1 border-t border-zinc-500/15 pt-1.5">
+                    {projects.map((project) => (
+                      <button
+                        key={project.id}
+                        type="button"
+                        disabled={t.projectId === project.id}
+                        onClick={() => {
+                          setTasks((previous) => previous.map((task) => task.id === t.id ? { ...task, projectId: project.id } : task));
+                          setMovingTaskId("");
+                        }}
+                        className="min-h-9 rounded-lg px-2 text-[10px] text-emerald-400 hover:bg-emerald-500/10 disabled:cursor-default disabled:text-zinc-500"
+                      >
+                        {project.id === "default" ? (lang === "en" ? "General" : "Genel") : project.name}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               </div>
             ))
           )}

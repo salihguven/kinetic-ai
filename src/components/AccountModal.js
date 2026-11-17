@@ -76,10 +76,19 @@ export default function AccountModal({
       }
 
       try {
-        localStorage.removeItem("kinetic_ai_providers");
-        localStorage.removeItem("kinetic_ai_chats");
-        localStorage.removeItem("kinetic_ai_notes");
-        localStorage.removeItem("kinetic_ai_tasks");
+        for (const key of [
+          "kinetic_ai_providers",
+          "kinetic_ai_chats",
+          "kinetic_ai_notes",
+          "kinetic_ai_tasks",
+          "kinetic_ai_projects",
+          "kinetic_ai_active_project",
+          "kinetic_ai_assistant_settings",
+          "kinetic_ai_reasoning_level",
+          "kinetic_ai_notifications",
+          "kinetic_ai_lang",
+          "kinetic_ai_theme",
+        ]) localStorage.removeItem(key);
         localStorage.removeItem(`kinetic_ban_${firebaseUser.uid}`);
       } catch {
         // The server-side account is already deleted; local cleanup is best effort.
@@ -191,7 +200,7 @@ export default function AccountModal({
               <div className="space-y-2 rounded-xl border border-red-500/30 bg-red-500/10 p-3">
                 <p className="text-red-300">
                   Hesabınız ve KineticAI kayıtlarınız silinir; bu tarayıcıdaki sohbet,
-                  not, görev ve sağlayıcı ayarları temizlenir. Diğer cihazlardaki yerel
+                  not, görev, proje, tercih ve sağlayıcı ayarları temizlenir. Diğer cihazlardaki yerel
                   kopyaları o cihazlardan ayrıca silmeniz gerekir.
                 </p>
                 <div className="flex gap-2">

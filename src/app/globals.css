@@ -89,6 +89,23 @@ select {
   min-height: 48px;
 }
 
+/* Sidebar history actions stay compact on desktop and finger-friendly on mobile. */
+.sidebar-chat-action {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+}
+
+@media (max-width: 767px) {
+  .sidebar-chat-action {
+    width: 48px;
+    height: 48px;
+    min-width: 48px;
+    min-height: 48px;
+  }
+}
+
 /* Mobil Çentik / Safe Area Koruması */
 .safe-top {
   padding-top: env(safe-area-inset-top, 0px);

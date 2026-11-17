@@ -29,7 +29,7 @@
   },
   "overrides": {
     "jwks-rsa": {
-      "jose": "^5.10.0"
+      "jose": "5.10.0"
     }
   },
   "devDependencies": {
