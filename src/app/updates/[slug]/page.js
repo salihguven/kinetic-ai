@@ -1,4 +1,5 @@
 import { cache } from "react";
+import { Suspense } from "react";
 import { connection } from "next/server";
 import { notFound } from "next/navigation";
 import Image from "next/image";
@@ -77,7 +78,6 @@ function extractHeadings(markdown) {
 }
 
 export async function generateMetadata({ params }) {
-  await connection();
   const { slug } = await params;
   const article = await getPublishedArticle(slug);
   if (!article) return { title: "Güncelleme bulunamadı | KineticAI", robots: { index: false, follow: false } };
@@ -103,8 +103,33 @@ export async function generateMetadata({ params }) {
   };
 }
 
-export default async function UpdateArticlePage({ params }) {
+async function WaitForRequest() {
   await connection();
+  return null;
+}
+
+function DynamicMetadataMarker() {
+  return (
+    <Suspense fallback={null}>
+      <WaitForRequest />
+    </Suspense>
+  );
+}
+
+function ArticleLoading() {
+  return (
+    <main className="min-h-screen bg-[#080910] px-4 py-12 text-white sm:px-6">
+      <div className="mx-auto max-w-3xl animate-pulse">
+        <div className="h-4 w-40 rounded bg-white/10" />
+        <div className="mt-6 h-10 max-w-2xl rounded bg-white/10" />
+        <div className="mt-4 h-5 max-w-xl rounded bg-white/[0.06]" />
+        <div className="mt-10 aspect-video rounded-2xl bg-white/[0.04]" />
+      </div>
+    </main>
+  );
+}
+
+async function UpdateArticleContent({ params }) {
   const { slug } = await params;
   const article = await getPublishedArticle(slug);
   if (!article) notFound();
@@ -211,5 +236,16 @@ export default async function UpdateArticlePage({ params }) {
         </nav>
       </footer>
     </main>
+  );
+}
+
+export default function UpdateArticlePage({ params }) {
+  return (
+    <>
+      <DynamicMetadataMarker />
+      <Suspense fallback={<ArticleLoading />}>
+        <UpdateArticleContent params={params} />
+      </Suspense>
+    </>
   );
 }
