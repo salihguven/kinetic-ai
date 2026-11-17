@@ -17,7 +17,7 @@ import {
   CheckCircle2,
   KeyRound,
   Loader2,
-} from "lucide-react";
+} from "@/components/KineticIcons";
 
 export default function AccountModal({
   isOpen,

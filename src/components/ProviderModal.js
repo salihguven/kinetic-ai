@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { X, ShieldCheck, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+import { X, ShieldCheck, AlertCircle, CheckCircle2, Loader2 } from "@/components/KineticIcons";
 import CustomSelect from "./CustomSelect";
 
 const PRESETS = [

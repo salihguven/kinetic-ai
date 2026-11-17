@@ -2,7 +2,7 @@
 "use client";
 
 import { useEffect, useRef } from "react";
-import { Sparkles } from "lucide-react";
+import { Sparkles } from "@/components/KineticIcons";
 
 export default function AdBanner({
   slotId = "",

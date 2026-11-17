@@ -15,7 +15,7 @@ import {
   Upload,
   X,
   FolderInput,
-} from "lucide-react";
+} from "@/components/KineticIcons";
 import MarkdownMessage from "./MarkdownMessage";
 import { MessageSkeleton } from "./SkeletonLoader";
 import ConfirmModal from "./ConfirmModal";

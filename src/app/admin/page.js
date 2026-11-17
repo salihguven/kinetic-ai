@@ -2,8 +2,8 @@
 import AdminClient from "./AdminClient";
 
 export const metadata = {
-  title: "Admin Paneli | KineticAI",
-  description: "KineticAI yönetim paneli",
+  title: "Sayfa bulunamadı",
+  description: "Aradığınız sayfa bulunamadı.",
   robots: { index: false, follow: false },
 };
 

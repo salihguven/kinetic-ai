@@ -1,7 +1,7 @@
 // src/components/TutorModal.js
 "use client";
 
-import { X, HelpCircle, Zap, Link2, BookOpen, CheckSquare, ShieldCheck } from "lucide-react";
+import { X, HelpCircle, Zap, Link2, BookOpen, CheckSquare, ShieldCheck } from "@/components/KineticIcons";
 
 export default function TutorModal({ isOpen, onClose, darkMode }) {
   if (!isOpen) return null;

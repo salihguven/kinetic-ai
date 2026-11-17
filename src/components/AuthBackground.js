@@ -14,6 +14,7 @@ export default function AuthBackground({ darkMode = true }) {
     const prefersReducedMotion =
       typeof window !== "undefined" &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const isMobile = window.matchMedia("(max-width: 767px)").matches;
 
     let width = 0;
     let height = 0;
@@ -21,15 +22,15 @@ export default function AuthBackground({ darkMode = true }) {
     let nodes = [];
     let rafId = null;
 
-    const NODE_COUNT = 110;
-    const MAX_DIST = 160;
-    const SPEED = 0.22;
+    const NODE_COUNT = isMobile ? 38 : 88;
+    const MAX_DIST = isMobile ? 112 : 150;
+    const SPEED = isMobile ? 0.16 : 0.22;
 
     const lineColor = darkMode ? "16, 185, 129" : "5, 150, 105";
     const dotColor = darkMode ? "52, 211, 153" : "16, 185, 129";
 
     function resize() {
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.25 : 1.75);
       width = canvas.offsetWidth;
       height = canvas.offsetHeight;
       canvas.width = width * dpr;
@@ -103,27 +104,33 @@ export default function AuthBackground({ darkMode = true }) {
         ctx.fill();
       }
 
-      rafId = requestAnimationFrame(step);
+      if (!prefersReducedMotion && !document.hidden) {
+        rafId = requestAnimationFrame(step);
+      }
     }
 
     resize();
     initNodes();
-
-    if (!prefersReducedMotion) {
-      step();
-    } else {
-      step();
-      if (rafId) cancelAnimationFrame(rafId);
-    }
+    step();
 
     const handleResize = () => {
       resize();
       initNodes();
     };
+    const handleVisibility = () => {
+      if (document.hidden && rafId) {
+        cancelAnimationFrame(rafId);
+        rafId = null;
+      } else if (!document.hidden && !prefersReducedMotion && !rafId) {
+        step();
+      }
+    };
     window.addEventListener("resize", handleResize);
+    document.addEventListener("visibilitychange", handleVisibility);
 
     return () => {
       window.removeEventListener("resize", handleResize);
+      document.removeEventListener("visibilitychange", handleVisibility);
       if (rafId) cancelAnimationFrame(rafId);
     };
   }, [darkMode]);

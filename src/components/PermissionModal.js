@@ -1,7 +1,7 @@
 // src/components/PermissionModal.js
 "use client";
 
-import { Bell, ShieldCheck, X } from "lucide-react";
+import { Bell, ShieldCheck, X } from "@/components/KineticIcons";
 
 export default function PermissionModal({
   isOpen,

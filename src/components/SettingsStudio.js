@@ -3,7 +3,7 @@
 import {
   BarChart3, Bell, Check, ChevronRight, Cloud, Globe, Link2, Moon,
   ShieldCheck, Smartphone, Sparkles, Sun, UserRound,
-} from "lucide-react";
+} from "@/components/KineticIcons";
 import QuotaCard from "@/components/QuotaCard";
 import EncryptedBackupCard from "@/components/EncryptedBackupCard";
 

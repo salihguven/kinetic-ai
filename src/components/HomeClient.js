@@ -2,6 +2,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { onAuthStateChanged, signOut } from "firebase/auth";
 import CustomSelect from "@/components/CustomSelect";
 import { readSSE } from "@/lib/sseClient";
@@ -59,7 +60,7 @@ import {
   Brain,
   Folder,
   FolderInput,
-} from "lucide-react";
+} from "@/components/KineticIcons";
 import KineticLogo from "@/components/KineticLogo";
 import ChatEmptyState from "@/components/ChatEmptyState";
 import ProviderModal from "@/components/ProviderModal";
@@ -1851,7 +1852,7 @@ export default function HomeClient() {
                           if (event.key === "Escape") setEditingChatId("");
                         }}
                         onBlur={() => setEditingChatId("")}
-                        className="min-h-12 w-full rounded bg-transparent text-xs outline-none ring-1 ring-emerald-500/50"
+                        className="min-h-12 w-full rounded-lg border border-violet-400/30 bg-transparent px-2 text-xs outline-none focus:border-violet-300/60 focus:ring-0"
                         aria-label={lang === "en" ? "Conversation title" : "Sohbet başlığı"}
                       />
                     ) : (
@@ -2012,12 +2013,17 @@ export default function HomeClient() {
             {t.updates}
           </button>
 
+          <Link href="/geri-bildirim" onClick={closeMobileMenu} className={`flex min-h-11 w-full items-center justify-center gap-1.5 rounded-lg text-xs font-medium transition hover:bg-zinc-800/30 hover:underline ${darkMode ? "text-zinc-400" : "text-zinc-600"}`}>
+            <MessageSquare className="h-3 w-3" />
+            {lang === "en" ? "Report a bug or feedback" : "Hata bildir / geri bildirim"}
+          </Link>
+
           <p className="pb-1 text-center text-[9px] opacity-35">KineticAI by True Kinetic Studios</p>
         </div>
       </aside>
 
       {/* SAĞ ANA ALAN */}
-      <main className="flex flex-1 flex-col overflow-hidden">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
         <header
           className={`relative flex min-h-[56px] items-center justify-between border-b px-4 py-2 md:px-6 ${darkMode ? "border-zinc-800/80" : "border-zinc-200 bg-white/70"
             }`}
@@ -2481,7 +2487,7 @@ export default function HomeClient() {
             </div>
 
             {/* Alt Mesaj Kutusu */}
-            <div className="px-4 pb-3 pt-2">
+            <div className="mobile-safe-bottom px-3 pb-3 pt-2 sm:px-4">
               <div className="mx-auto max-w-3xl">
                 {attachments.length > 0 && (
                   <div className="mb-2 flex flex-wrap gap-2">
@@ -2602,7 +2608,7 @@ export default function HomeClient() {
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     placeholder={isListening ? (lang === "en" ? "Listening… speak now" : "Dinleniyor… şimdi konuş") : t.inputPlaceholder}
-                    className="max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-1 py-2.5 text-sm outline-none"
+                    className="chat-composer-input max-h-40 min-h-[44px] flex-1 resize-none bg-transparent px-1 py-2.5 text-sm outline-none"
                   />
 
                   <button

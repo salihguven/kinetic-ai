@@ -1,6 +1,7 @@
 
 import { NextResponse, connection } from "next/server";
 import { getAdminDb } from "@/lib/firebaseServer";
+import { normalizePublicUpdate } from "@/lib/updateContent";
 
 export async function GET() {
   await connection();
@@ -14,19 +15,7 @@ export async function GET() {
       .get();
 
     const updates = snapshot.docs
-      .map((doc) => {
-        const data = doc.data();
-
-        return {
-          id: doc.id,
-          title: data.title || "",
-          description: data.description || "",
-          version: data.version || "",
-          status: data.status || "published",
-          createdAt:
-            data.createdAt?.toDate?.()?.toISOString() || null,
-        };
-      })
+      .map((doc) => ({ ...normalizePublicUpdate(doc.id, doc.data()), status: "published" }))
       .sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""))
       .slice(0, 50);
 

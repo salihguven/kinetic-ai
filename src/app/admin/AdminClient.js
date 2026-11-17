@@ -3,15 +3,19 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { getApps, initializeApp } from "firebase/app";
 import { getAuth, onAuthStateChanged } from "firebase/auth";
-import { Ban, Download, ShieldCheck } from "lucide-react";
+import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { Ban, Download, ShieldCheck } from "@/components/KineticIcons";
+import CustomSelect from "@/components/CustomSelect";
 import { readApiJson } from "@/lib/apiResponse";
 
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
@@ -29,6 +33,7 @@ const navigation = [
   { id: "dashboard", label: "Genel Bakış", icon: "◫" },
   { id: "users", label: "Kullanıcılar", icon: "♙" },
   { id: "updates", label: "Güncellemeler", icon: "↗" },
+  { id: "feedback", label: "Geri bildirimler", icon: "✉" },
 ];
 
 const formatDate = (date) => {
@@ -49,6 +54,9 @@ export default function AdminClient() {
   const [nextUsersPageToken, setNextUsersPageToken] = useState("");
   const [usersPageHistory, setUsersPageHistory] = useState([]);
   const [updates, setUpdates] = useState([]);
+  const [feedbackReports, setFeedbackReports] = useState([]);
+  const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackActionId, setFeedbackActionId] = useState("");
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState("");
@@ -59,11 +67,18 @@ export default function AdminClient() {
   const [roleFilter, setRoleFilter] = useState("all");
   const [mobileMenu, setMobileMenu] = useState(false);
   const [publishing, setPublishing] = useState(false);
+  const [uploadingMedia, setUploadingMedia] = useState("");
+  const [mediaUploadMessage, setMediaUploadMessage] = useState(null);
 
   const [form, setForm] = useState({
     title: "",
     description: "",
     version: "",
+    category: "feature",
+    articleBody: "",
+    coverImage: "",
+    coverAlt: "",
+    videoUrl: "",
   });
 
   const [accessDenied, setAccessDenied] = useState(false);
@@ -109,7 +124,7 @@ export default function AdminClient() {
 
       const usersParams = new URLSearchParams({ limit: "100" });
       if (requestedPageToken) usersParams.set("pageToken", requestedPageToken);
-      const [usersResult, updatesResult] = await Promise.allSettled([
+      const [usersResult, updatesResult, feedbackResult] = await Promise.allSettled([
         fetch(`/api/admin/users?${usersParams.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
@@ -118,6 +133,10 @@ export default function AdminClient() {
           headers: { Authorization: `Bearer ${token}` },
           cache: "no-store",
         }).then(async (response) => ({ response, data: await readApiJson(response, "Güncelleme listesi") })),
+        fetch("/api/admin/feedback", {
+          headers: { Authorization: `Bearer ${token}` },
+          cache: "no-store",
+        }).then(async (response) => ({ response, data: await readApiJson(response, "Geri bildirimler") })),
       ]);
 
       if (usersResult.status === "fulfilled" && usersResult.value.response.ok && Array.isArray(usersResult.value.data.users)) {
@@ -141,6 +160,16 @@ export default function AdminClient() {
           ? updatesResult.reason?.message
           : updatesResult.value.data.error || `Güncellemeler yüklenemedi (HTTP ${updatesResult.value.response.status}).`;
         setError(message || "Güncelleme listesi alınamadı.");
+      }
+
+      if (feedbackResult.status === "fulfilled" && feedbackResult.value.response.ok && Array.isArray(feedbackResult.value.data.reports)) {
+        setFeedbackReports(feedbackResult.value.data.reports);
+        setFeedbackError("");
+      } else {
+        const message = feedbackResult.status === "rejected"
+          ? feedbackResult.reason?.message
+          : feedbackResult.value.data.error || `Geri bildirimler yüklenemedi (HTTP ${feedbackResult.value.response.status}).`;
+        setFeedbackError(message || "Geri bildirim listesi alınamadı.");
       }
     } catch (err) {
       setError(err.message || "Bir bağlantı hatası oluştu.");
@@ -354,7 +383,8 @@ export default function AdminClient() {
         throw new Error(data.error || "Güncelleme yayınlanamadı.");
       }
 
-      setForm({ title: "", description: "", version: "" });
+      setForm({ title: "", description: "", version: "", category: "feature", articleBody: "", coverImage: "", coverAlt: "", videoUrl: "" });
+      setMediaUploadMessage(null);
       setSuccess("Güncelleme başarıyla yayınlandı.");
 
       await loadDashboard(user, true);
@@ -362,6 +392,85 @@ export default function AdminClient() {
       setError(err.message);
     } finally {
       setPublishing(false);
+    }
+  }
+
+  async function uploadUpdateMedia(event, kind) {
+    const input = event.currentTarget;
+    const file = input.files?.[0];
+    input.value = "";
+    if (!file || !user || uploadingMedia || publishing) return;
+
+    const mimeExtensions = kind === "image"
+      ? { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/avif": "avif" }
+      : { "video/mp4": "mp4", "video/webm": "webm", "video/ogg": "ogv" };
+    const extension = mimeExtensions[file.type];
+    const sizeLimit = kind === "image" ? 8 * 1024 * 1024 : 50 * 1024 * 1024;
+    if (!extension || file.size === 0 || file.size > sizeLimit) {
+      setMediaUploadMessage({ kind, error: true, text: kind === "image"
+        ? "PNG, JPG, WebP veya AVIF görsel seçin (en fazla 8 MB)."
+        : "MP4, WebM veya OGV video seçin (en fazla 50 MB)." });
+      return;
+    }
+
+    setUploadingMedia(kind);
+    setMediaUploadMessage(null);
+    try {
+      if (!firebaseConfig.storageBucket) throw new Error("Firebase Storage bucket ayarı bulunamadı.");
+      const tokenResult = await user.getIdTokenResult(true);
+      if (tokenResult.claims.admin !== true) throw new Error("Yükleme için Firebase admin yetkisi gerekiyor.");
+      const fileHead = new Uint8Array(await file.slice(0, 16).arrayBuffer());
+      const signature = Array.from(fileHead).map((byte) => String.fromCharCode(byte)).join("");
+      const validSignature = kind === "image"
+        ? (file.type === "image/jpeg" ? fileHead[0] === 0xff && fileHead[1] === 0xd8 && fileHead[2] === 0xff
+          : file.type === "image/png" ? signature.startsWith("\x89PNG\r\n\x1a\n")
+            : file.type === "image/webp" ? signature.startsWith("RIFF") && signature.slice(8, 12) === "WEBP"
+              : signature.slice(4, 12).includes("ftyp") && /avif|avis/.test(signature.slice(8, 16)) )
+        : (file.type === "video/mp4" ? signature.slice(4, 8) === "ftyp"
+          : file.type === "video/webm" ? fileHead[0] === 0x1a && fileHead[1] === 0x45 && fileHead[2] === 0xdf && fileHead[3] === 0xa3
+            : signature.startsWith("OggS"));
+      if (!validSignature) throw new Error("Dosya içeriği seçilen medya türüyle uyuşmuyor.");
+
+      const app = getApps()[0] || initializeApp(firebaseConfig);
+      const storage = getStorage(app);
+      const objectName = `${Date.now()}-${globalThis.crypto.randomUUID()}.${extension}`;
+      const objectRef = ref(storage, `updates/${user.uid}/${objectName}`);
+      await uploadBytes(objectRef, file, {
+        contentType: file.type,
+        cacheControl: "public,max-age=31536000,immutable",
+      });
+      const downloadUrl = await getDownloadURL(objectRef);
+      setForm((current) => ({ ...current, [kind === "image" ? "coverImage" : "videoUrl"]: downloadUrl }));
+      setMediaUploadMessage({ kind, text: kind === "image" ? "Görsel yüklendi ve forma eklendi." : "Video yüklendi ve forma eklendi." });
+    } catch (uploadError) {
+      setMediaUploadMessage({ kind, error: true, text: uploadError.code === "storage/unauthorized"
+        ? "Firebase Storage erişimi reddedildi. storage.rules dosyasındaki admin yükleme kuralının projeye dağıtıldığını kontrol edin."
+        : uploadError.message || "Medya yüklenemedi. Storage ayarlarını ve bağlantıyı kontrol edin." });
+    } finally {
+      setUploadingMedia("");
+    }
+  }
+
+  async function updateFeedbackStatus(report, status) {
+    if (!user || feedbackActionId) return;
+    setFeedbackActionId(report.id);
+    setError("");
+    setSuccess("");
+    try {
+      const token = await user.getIdToken();
+      const response = await fetch("/api/admin/feedback", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ id: report.id, status }),
+      });
+      const data = await readApiJson(response, "Bildirim durumu");
+      if (!response.ok || data.success !== true) throw new Error(data.error || "Bildirim durumu değiştirilemedi.");
+      setFeedbackReports((reports) => reports.map((item) => item.id === report.id ? { ...item, status } : item));
+      setSuccess("Bildirim durumu güncellendi.");
+    } catch (err) {
+      setError(err.message || "Bildirim durumu değiştirilemedi.");
+    } finally {
+      setFeedbackActionId("");
     }
   }
 
@@ -378,20 +487,12 @@ export default function AdminClient() {
 
   if (!user || accessDenied) {
     return (
-      <div className="min-h-screen bg-[#080910] flex items-center justify-center p-6 text-white">
-        <div className="max-w-md w-full rounded-3xl border border-white/10 bg-[#11131e] p-10 text-center shadow-2xl">
-          <div className="w-16 h-16 rounded-2xl bg-red-500/10 text-red-400 flex items-center justify-center text-3xl mx-auto mb-6">
-            ⛨
-          </div>
-          <h1 className="text-2xl font-bold mb-3">
-            {user ? "Erişim reddedildi" : "Giriş gerekli"}
-          </h1>
-          <p className="text-gray-400 text-sm leading-6">
-            {error || (user
-              ? "Bu alana erişmek için doğrulanmış Admin yetkisi gerekiyor."
-              : "Admin panelini kullanmak için hesabına giriş yapmalısın.")}
-          </p>
-          <Link href="/" className="inline-flex mt-7 px-6 py-3 rounded-xl bg-violet-600 hover:bg-violet-500 transition font-semibold">
+      <div className="min-h-[100dvh] bg-[#080910] px-5 text-white grid place-items-center safe-top safe-bottom">
+        <div className="w-full max-w-md text-center">
+          <p className="font-mono text-7xl font-semibold tracking-tight text-white">404</p>
+          <h1 className="mt-4 text-xl font-semibold">Sayfa bulunamadı</h1>
+          <p className="mt-2 text-sm leading-6 text-gray-400">Aradığın sayfa mevcut olmayabilir veya taşınmış olabilir.</p>
+          <Link href="/" className="touch-target mt-6 inline-flex items-center justify-center rounded-xl border border-white/10 px-5 text-sm font-medium transition hover:bg-white/[0.06]">
             Ana sayfaya dön
           </Link>
         </div>
@@ -414,7 +515,7 @@ export default function AdminClient() {
       )}
 
       {/* Sidebar */}
-      <aside className={`fixed md:sticky top-0 left-0 z-50 h-screen w-[265px] shrink-0 border-r border-white/[0.07] bg-[#0d0f19] flex flex-col transition-transform duration-300 ${
+      <aside className={`fixed md:sticky top-0 left-0 z-50 h-dvh w-[min(265px,calc(100vw-2rem))] shrink-0 border-r border-white/[0.07] bg-[#0d0f19] flex flex-col pb-[env(safe-area-inset-bottom)] transition-transform duration-300 ${
         mobileMenu ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       }`}>
         <div className="h-[88px] px-7 flex items-center justify-between border-b border-white/[0.07]">
@@ -431,7 +532,7 @@ export default function AdminClient() {
               </div>
             </div>
           </Link>
-          <button onClick={() => setMobileMenu(false)} className="md:hidden text-gray-400 text-xl">×</button>
+            <button aria-label="Menüyü kapat" onClick={() => setMobileMenu(false)} className="touch-target md:hidden text-gray-400 text-xl">×</button>
         </div>
 
         <div className="px-5 pt-8">
@@ -490,9 +591,9 @@ export default function AdminClient() {
       <main className="flex-1 min-w-0">
 
         {/* Header */}
-        <header className="h-[88px] border-b border-white/[0.07] bg-[#0b0d15]/80 backdrop-blur-xl sticky top-0 z-30 px-5 md:px-9 flex items-center justify-between">
+        <header className="min-h-[72px] pt-[env(safe-area-inset-top)] border-b border-white/[0.07] bg-[#0b0d15]/80 backdrop-blur-xl sticky top-0 z-30 px-3 sm:px-5 md:px-9 flex items-center justify-between">
           <div className="flex items-center gap-4">
-            <button onClick={() => setMobileMenu(true)} className="md:hidden text-2xl text-gray-400">
+            <button aria-label="Yönetim menüsünü aç" onClick={() => setMobileMenu(true)} className="touch-target md:hidden text-2xl text-gray-400">
               ☰
             </button>
             <div>
@@ -520,7 +621,7 @@ export default function AdminClient() {
           </div>
         </header>
 
-        <div className="p-5 md:p-9 max-w-[1600px] mx-auto">
+        <div className="p-3 sm:p-5 md:p-9 max-w-[1600px] mx-auto">
 
           {error && (
             <div className="mb-6 rounded-xl border border-red-500/20 bg-red-500/[0.07] text-red-300 p-4 text-sm flex justify-between gap-3">
@@ -581,6 +682,7 @@ export default function AdminClient() {
                   <StatCard label="Tester hesapları" value={stats.testers} icon="⌘" color="blue" detail="Tester yetkisi olanlar" />
                   <StatCard label="Devre dışı hesaplar" value={stats.disabled} icon="⊘" color="amber" detail="Kapalı hesaplar" />
                   <StatCard label="KineticAI yasağı" value={stats.banned} icon="⊗" color="amber" detail="Yasaklı hesaplar" />
+                  <StatCard label="Yeni bildirim" value={feedbackError ? "—" : feedbackReports.filter((report) => report.status === "new").length} icon="✉" color="violet" detail={feedbackError ? "Veri alınamadı" : `${feedbackReports.length} son kayıt`} />
                 </div>
               </section>
 
@@ -625,6 +727,7 @@ export default function AdminClient() {
                     <SummaryRow label="Yasaklı kullanıcı" value={stats.banned} color="amber" />
                     <SummaryRow label="Normal kullanıcı" value={users.filter((u) => u.role === "user").length} color="gray" />
                     <SummaryRow label="Güncellemeler" value={updates.length} color="emerald" />
+                    <SummaryRow label="Yeni geri bildirim" value={feedbackError ? "—" : feedbackReports.filter((report) => report.status === "new").length} color="violet" />
                   </div>
 
                   <div className="mt-7 rounded-xl bg-emerald-500/[0.06] border border-emerald-500/10 p-4">
@@ -730,17 +833,20 @@ export default function AdminClient() {
                   </div>
 
                   <div className="flex flex-col sm:flex-row gap-3">
-                    <select
-                      value={roleFilter}
-                      onChange={(e) => setRoleFilter(e.target.value)}
-                      className="h-11 rounded-xl bg-[#080a12] border border-white/[0.07] px-4 text-sm text-gray-300 outline-none"
-                    >
-                      <option value="all">Tüm roller</option>
-                      <option value="founder">Kurucu</option>
-                      <option value="admin">Admin</option>
-                      <option value="tester">Tester</option>
-                      <option value="user">User</option>
-                    </select>
+                    <div className="w-full min-w-40 sm:w-48">
+                      <CustomSelect
+                        ariaLabel="Kullanıcı rolüne göre filtrele"
+                        value={roleFilter}
+                        onChange={setRoleFilter}
+                        options={[
+                          { value: "all", label: "Tüm roller" },
+                          { value: "founder", label: "Kurucu" },
+                          { value: "admin", label: "Admin" },
+                          { value: "tester", label: "Tester" },
+                          { value: "user", label: "Kullanıcı" },
+                        ]}
+                      />
+                    </div>
                   </div>
                 </div>
 
@@ -888,6 +994,58 @@ export default function AdminClient() {
             </div>
           )}
 
+          {activeTab === "feedback" && (
+            <section className="space-y-5">
+              <div>
+                <h2 className="text-2xl font-bold">Geri bildirim kuyruğu</h2>
+                <p className="mt-2 text-sm text-gray-500">Hata raporlarını, güvenlik bildirimlerini ve ürün önerilerini inceleyip durumlandır.</p>
+              </div>
+              {feedbackError ? (
+                <div role="alert" className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-4 text-sm text-amber-200">{feedbackError}</div>
+              ) : feedbackReports.length === 0 ? (
+                <div className="rounded-2xl border border-white/[0.08] bg-[#10121d] px-5 py-12 text-center">
+                  <p className="text-base font-semibold">Henüz bildirim yok</p>
+                  <p className="mt-2 text-sm text-gray-500">Kullanıcıların gönderdiği geri bildirimler burada listelenir.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {feedbackReports.map((report) => (
+                    <article key={report.id} className="rounded-2xl border border-white/[0.08] bg-[#10121d] p-4 sm:p-5">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="break-words text-base font-semibold">{report.title}</h3>
+                            <span className="rounded-full border border-violet-400/20 bg-violet-400/[0.07] px-2.5 py-1 text-[11px] text-violet-200">{{ feedback: "Geri bildirim", bug: "Hata", suggestion: "Öneri", security: "Güvenlik" }[report.type] || "Bildirim"}</span>
+                          </div>
+                          <p className="mt-2 text-xs text-gray-500">{formatDate(report.createdAt)} · {report.source} · {report.contactEmail || "Yanıt e-postası yok"}</p>
+                        </div>
+                        <div className="min-w-36">
+                          <CustomSelect
+                            ariaLabel={`${report.title} durumu`}
+                            value={report.status}
+                            disabled={feedbackActionId === report.id}
+                            onChange={(status) => updateFeedbackStatus(report, status)}
+                            options={[
+                              { value: "new", label: "Yeni" },
+                              { value: "reviewing", label: "İnceleniyor" },
+                              { value: "resolved", label: "Çözüldü" },
+                              { value: "closed", label: "Kapatıldı" },
+                            ]}
+                          />
+                        </div>
+                      </div>
+                      <p className="mt-4 whitespace-pre-wrap break-words text-sm leading-6 text-gray-300">{report.details}</p>
+                      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-white/[0.06] pt-3 text-xs text-gray-500">
+                        <span>Ref: <code className="font-mono">{report.id}</code>{report.userId ? ` · Hesap: ${report.userId}` : " · Misafir bildirimi"}</span>
+                        {report.contactEmail && <a className="text-violet-300 hover:text-violet-200" href={`mailto:${encodeURIComponent(report.contactEmail)}?subject=${encodeURIComponent(`KineticAI bildiriminiz: ${report.title}`)}`}>E-posta ile yanıtla</a>}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
           {/* UPDATES */}
           {activeTab === "updates" && (
             <div className="space-y-6">
@@ -902,7 +1060,7 @@ export default function AdminClient() {
 
                 <form
                   onSubmit={publishUpdate}
-                  className="xl:col-span-3 rounded-2xl border border-white/[0.07] bg-[#10121d] p-6 md:p-8 space-y-5"
+                  className="xl:col-span-3 rounded-2xl border border-white/[0.07] bg-[#10121d] p-4 sm:p-6 md:p-8 space-y-5"
                 >
                   <div className="flex items-center gap-3 pb-5 border-b border-white/[0.06]">
                     <div className="w-11 h-11 rounded-xl bg-violet-500/15 text-violet-300 flex items-center justify-center text-xl">✎</div>
@@ -933,30 +1091,92 @@ export default function AdminClient() {
                     />
                   </Field>
 
-                  <Field label="Güncelleme açıklaması">
+                  <Field label="Tür">
+                    <CustomSelect
+                      ariaLabel="Güncelleme türü"
+                      value={form.category}
+                      onChange={(category) => setForm((current) => ({ ...current, category }))}
+                      options={[
+                        { value: "feature", label: "Yeni özellik" },
+                        { value: "improvement", label: "İyileştirme" },
+                        { value: "fix", label: "Hata düzeltmesi" },
+                        { value: "announcement", label: "Duyuru" },
+                      ]}
+                    />
+                  </Field>
+
+                  <Field label="Kısa açıklama">
                     <textarea
                       required
-                      maxLength={5000}
-                      rows={7}
+                      maxLength={280}
+                      rows={3}
                       value={form.description}
                       onChange={(e) => setForm({ ...form, description: e.target.value })}
-                      placeholder="Bu sürümde neler değişti? Kullanıcılara anlat..."
+                      placeholder="Güncellemenin özünü bir iki cümlede anlat..."
                       className="admin-input resize-y"
                     />
                     <p className="text-right text-[10px] text-gray-600 mt-2">
-                      {form.description.length}/5000
+                      {form.description.length}/280
                     </p>
                   </Field>
 
+                  <Field label="Ayrıntılı yazı (isteğe bağlı)">
+                    <textarea
+                      maxLength={20000}
+                      rows={12}
+                      value={form.articleBody}
+                      onChange={(e) => setForm({ ...form, articleBody: e.target.value })}
+                      placeholder="Büyük bir sürümse nelerin değiştiğini başlıklar ve paragraflarla anlat. Markdown başlıkları ve listeler kullanılabilir."
+                      className="admin-input resize-y"
+                    />
+                    <p className="mt-2 text-xs leading-5 text-gray-500">Ayrıntılı içerik eklenirse güncelleme kartından bu yazının sayfasına bağlantı verilir.</p>
+                  </Field>
+
+                  <Field label="Kapak görseli (isteğe bağlı)">
+                    <input
+                      maxLength={300}
+                      value={form.coverImage}
+                      onChange={(e) => setForm({ ...form, coverImage: e.target.value })}
+                      placeholder="/updates/ozellik-gorseli.webp"
+                      className="admin-input"
+                    />
+                    <label className="mt-3 flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-white/15 px-4 text-center text-sm text-gray-300 transition hover:border-violet-400/50 hover:bg-white/[0.025]">
+                      <input type="file" accept="image/jpeg,image/png,image/webp,image/avif" disabled={Boolean(uploadingMedia) || publishing} onChange={(event) => uploadUpdateMedia(event, "image")} className="sr-only" />
+                      {uploadingMedia === "image" ? "Görsel yükleniyor…" : "Cihazdan görsel seç · en fazla 8 MB"}
+                    </label>
+                    <p className="mt-2 text-xs leading-5 text-gray-500">Dosyayı doğrudan yükleyin veya bu projedeki bir public görsel yolunu girin.</p>
+                    {(form.coverImage.startsWith("/") && !form.coverImage.startsWith("//") && !form.coverImage.includes("..") && !form.coverImage.includes("\\") && /\.(?:png|jpe?g|webp|avif)$/i.test(form.coverImage) || form.coverImage.startsWith("https://firebasestorage.googleapis.com/")) && (
+                      <div className="relative mt-3 aspect-video max-w-lg overflow-hidden rounded-xl border border-white/10 bg-black/30">
+                        <Image src={form.coverImage} alt={form.coverAlt || "Güncelleme kapak görseli önizlemesi"} fill unoptimized sizes="(max-width: 768px) 100vw, 512px" className="object-cover" />
+                      </div>
+                    )}
+                    {mediaUploadMessage?.kind === "image" && <p className={`mt-2 text-xs leading-5 ${mediaUploadMessage.error ? "text-red-300" : "text-emerald-300"}`} role={mediaUploadMessage.error ? "alert" : "status"}>{mediaUploadMessage.text}</p>}
+                  </Field>
+
+                  <Field label="Görsel açıklaması (erişilebilirlik için)">
+                    <input maxLength={200} value={form.coverAlt} onChange={(e) => setForm({ ...form, coverAlt: e.target.value })} placeholder="Görselde ne gösteriliyor?" className="admin-input" />
+                  </Field>
+
+                  <Field label="Video (isteğe bağlı)">
+                    <input maxLength={500} value={form.videoUrl} onChange={(e) => setForm({ ...form, videoUrl: e.target.value })} placeholder="YouTube/Vimeo bağlantısı veya /updates/demo.mp4" className="admin-input" />
+                    <label className="mt-3 flex min-h-12 cursor-pointer items-center justify-center rounded-xl border border-dashed border-white/15 px-4 text-center text-sm text-gray-300 transition hover:border-violet-400/50 hover:bg-white/[0.025]">
+                      <input type="file" accept="video/mp4,video/webm,video/ogg" disabled={Boolean(uploadingMedia) || publishing} onChange={(event) => uploadUpdateMedia(event, "video")} className="sr-only" />
+                      {uploadingMedia === "video" ? "Video yükleniyor…" : "Cihazdan video seç · en fazla 50 MB"}
+                    </label>
+                    <p className="mt-2 text-xs leading-5 text-gray-500">YouTube/Vimeo bağlantısı veya doğrudan yükleme. Video dosyaları herkese açık güncelleme sayfasında oynatılır.</p>
+                    {form.videoUrl && <p className="mt-2 break-all text-xs text-violet-300">Video adresi girildi · Yayın öncesinde ayrıntı sayfasında gösterilir. Yalnızca paylaşma hakkınız olan medyayı ekleyin.</p>}
+                    {mediaUploadMessage?.kind === "video" && <p className={`mt-2 text-xs leading-5 ${mediaUploadMessage.error ? "text-red-300" : "text-emerald-300"}`} role={mediaUploadMessage.error ? "alert" : "status"}>{mediaUploadMessage.text}</p>}
+                  </Field>
+
                   <button
-                    disabled={publishing}
+                    disabled={publishing || Boolean(uploadingMedia)}
                     className="w-full rounded-xl bg-gradient-to-r from-violet-600 to-blue-600 hover:brightness-110 disabled:opacity-50 py-3.5 font-bold text-sm shadow-lg shadow-violet-900/20 transition"
                   >
                     {publishing ? "Yayın hazırlanıyor..." : "↗  Güncellemeyi yayınla"}
                   </button>
                 </form>
 
-                <div className="xl:col-span-2 rounded-2xl border border-white/[0.07] bg-[#10121d] p-6">
+                <div className="xl:col-span-2 rounded-2xl border border-white/[0.07] bg-[#10121d] p-4 sm:p-6">
                   <div className="flex items-center justify-between mb-6">
                     <div>
                       <h3 className="font-bold">Yayın geçmişi</h3>
@@ -997,7 +1217,7 @@ export default function AdminClient() {
           )}
 
           <footer className="mt-12 pt-6 border-t border-white/[0.06] flex flex-col sm:flex-row justify-between gap-3 text-[10px] text-gray-600">
-            <span>© {new Date().getFullYear()} KineticAI · Administration</span>
+            <span>© 2026 KineticAI · Administration</span>
             <span>Güvenli yönetim merkezi</span>
           </footer>
         </div>

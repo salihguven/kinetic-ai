@@ -38,7 +38,7 @@ export default function AboutPage() {
             <p>{section.body}</p>
           </section>
         ))}
-        <p>Ürün geliştirmelerini <a className="text-emerald-300 underline underline-offset-2" href="/updates">KineticAI güncellemeleri</a> sayfasında yayınlıyoruz. Gizlilik yaklaşımımız için <a className="text-emerald-300 underline underline-offset-2" href="/gizlilik-politikasi">Gizlilik Politikası</a> sayfasını okuyabilirsiniz.</p>
+        <p>Ürün geliştirmelerini <Link className="text-emerald-300 underline underline-offset-2" href="/updates">KineticAI güncellemeleri</Link> sayfasında yayınlıyoruz. Gizlilik yaklaşımımız için <Link className="text-emerald-300 underline underline-offset-2" href="/gizlilik-politikasi">Gizlilik Politikası</Link> sayfasını okuyabilirsiniz.</p>
       </article>
     </main>
   );

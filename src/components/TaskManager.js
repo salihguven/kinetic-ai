@@ -12,7 +12,7 @@ import {
   Flag,
   ListTodo,
   FolderInput,
-} from "lucide-react";
+} from "@/components/KineticIcons";
 import ConfirmModal from "./ConfirmModal";
 import { TRANSLATIONS } from "@/lib/i18n";
 import { formatFriendlyError } from "@/lib/uxHelpers";

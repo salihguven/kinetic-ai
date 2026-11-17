@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FolderKanban, FolderPlus, Pencil, Trash2, X, Check, Loader2 } from "lucide-react";
+import { FolderKanban, FolderPlus, Pencil, Trash2, X, Check, Loader2 } from "@/components/KineticIcons";
 import ConfirmModal from "@/components/ConfirmModal";
 import { DEFAULT_PROJECT_ID, MAX_PROJECTS, MAX_PROJECT_NAME_LENGTH, normalizeProjectName } from "@/lib/workspaceProjects";
 

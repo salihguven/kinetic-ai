@@ -6,7 +6,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
-import { Copy, Check } from "lucide-react";
+import { Copy, Check } from "@/components/KineticIcons";
 
 function CodeBlock({ inline, className, children, darkMode }) {
   const [copied, setCopied] = useState(false);

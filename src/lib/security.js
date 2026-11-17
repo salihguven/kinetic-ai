@@ -33,7 +33,7 @@ function isPrivateIPv6(host) {
     /^::ffff:(?:0:)?(?:127\.|10\.|192\.168\.|169\.254\.)/.test(value);
 }
 
-export function checkRateLimit(request, limit = 20, windowMs = 60_000) {
+export function checkRateLimit(request, limit = 20, windowMs = 60_000, namespace = "global") {
   const ip =
     request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
     request.headers.get("x-real-ip") ||
@@ -41,14 +41,15 @@ export function checkRateLimit(request, limit = 20, windowMs = 60_000) {
 
   const now = Date.now();
   pruneExpiredRateLimitEntries(now);
-  const existing = requestLog.get(ip);
+  const key = `${namespace}:${ip}`;
+  const existing = requestLog.get(key);
   if (!existing && requestLog.size >= 20_000) {
     return { allowed: false, message: "Sunucu şu anda yoğun. Lütfen biraz sonra tekrar deneyin." };
   }
 
   if (!existing || now - existing.startTime > windowMs) {
     const entry = { count: 1, startTime: now, expiresAt: now + windowMs };
-    requestLog.set(ip, entry);
+    requestLog.set(key, entry);
     return { allowed: true };
   }
 

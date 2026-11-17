@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronDown, ChevronUp, Loader2, RotateCcw, Zap } from "lucide-react";
+import { ChevronDown, ChevronUp, Loader2, RotateCcw, Zap } from "@/components/KineticIcons";
 
 export default function QuotaCard({
   dailyCount = 0,

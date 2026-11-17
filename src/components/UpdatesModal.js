@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Bell, Loader2, X } from "lucide-react";
+import Link from "next/link";
+import { Bell, Loader2, X } from "@/components/KineticIcons";
 import { loadPublishedUpdates } from "@/lib/updatesClient";
 
 export default function UpdatesModal({ isOpen, onClose, darkMode, embedded = false }) {
@@ -100,7 +101,8 @@ export default function UpdatesModal({ isOpen, onClose, darkMode, embedded = fal
                       {item.createdAt && <time dateTime={item.createdAt}>{new Date(item.createdAt).toLocaleDateString("tr-TR", { timeZone: "Europe/Istanbul" })}</time>}
                     </div>
                   </div>
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 opacity-70">{item.description}</p>
+                  <p className="mt-2 whitespace-pre-wrap text-sm leading-6 opacity-70">{item.summary || item.description}</p>
+                  {(item.articleBody || item.coverImage || item.videoUrl) && <Link href={`/updates/${item.slug || item.id}`} onClick={onClose} className="touch-target mt-2 inline-flex items-center text-sm font-medium text-violet-300 hover:text-violet-200">Ayrıntıları oku →</Link>}
                 </article>
               ))}
             </div>

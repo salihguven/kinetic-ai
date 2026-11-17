@@ -13,8 +13,8 @@ const sections = [
     body: (
       <>
         Bu politika, True Kinetic Studios adıyla sunulan KineticAI beta hizmetinin mevcut veri akışını açıklar. Gizlilik, erişim, düzeltme veya silme taleplerinizi{" "}
-        <a className="text-emerald-300 underline" href="mailto:info@truekinetichub.com.tr?subject=KineticAI%20gizlilik%20talebi">
-          info@truekinetichub.com.tr
+        <a className="text-emerald-300 underline" href="mailto:truekineticservices@gmail.com?subject=KineticAI%20gizlilik%20talebi">
+          truekineticservices@gmail.com
         </a>{" "}
         adresine iletebilirsiniz. Başvurunuzda hesabınızla ilişkili e-posta adresini belirtin; API anahtarınızı veya parolanızı e-postaya eklemeyin.
       </>
@@ -35,6 +35,10 @@ const sections = [
   {
     title: "Güvenlik için IP adresi işleme",
     body: "İstek hızını sınırlamak ve kötüye kullanımı önlemek için sunucu, isteğin IP adresini geçici olarak bellekteki bir hız sınırı kaydında işler. Bu kayıt sohbet içeriğine veya Firebase kullanıcı profiline eklenmez ve kalıcı bir KineticAI kullanıcı geçmişi oluşturmak için kullanılmaz. Kayıtların çalışma süresi, sunucu belleğinin yaşam döngüsü ve hız sınırı penceresiyle sınırlıdır.",
+  },
+  {
+    title: "Geri bildirim ve hata bildirimleri",
+    body: "Geri bildirim formuna yazdığınız bildirim türü, başlık ve açıklama; varsa iletişim e-postanız ve hesabınızla oturum açtıysanız Firebase kullanıcı kimliğiniz, bildirimi incelemek ve yanıtlamak amacıyla Firebase Firestore üzerindeki kısıtlı destek kuyruğunda saklanır. Bildiriminizle birlikte yalnızca sayfa yolu kaydedilir; sohbet metni, API anahtarı, parola ve dosya ekleri toplanmaz. IP adresi kötüye kullanımı sınırlamak için geçici hız sınırı belleğinde işlenir, destek kaydına eklenmez. Kayıtlar destek ve güvenlik amacı sürdüğü müddetçe tutulur; silme veya gizlilik talepleri için iletişim adresini kullanabilirsiniz. Güvenlik bildiriminize gizli anahtar veya kullanıcı verisi eklemeyin.",
   },
   {
     title: "Reklamlar, çerezler ve Google",
@@ -96,7 +100,7 @@ export default function PrivacyPolicyPage() {
           KineticAI by True Kinetic Studios · BETA
         </p>
         <h1 className="text-3xl font-black text-white sm:text-4xl">Gizlilik Politikası</h1>
-        <p className="text-sm text-gray-500">Son güncelleme: 16 Kasım 2026</p>
+        <p className="text-sm text-gray-500">Son güncelleme: 17 Kasım 2026</p>
         {sections.map((section) => (
           <section key={section.title}>
             <h2 className="mb-2 text-xl font-bold text-white">{section.title}</h2>

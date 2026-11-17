@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Download, FileUp, KeyRound, Loader2, LockKeyhole, ShieldCheck } from "lucide-react";
+import { Download, FileUp, KeyRound, Loader2, LockKeyhole, ShieldCheck } from "@/components/KineticIcons";
 import ConfirmModal from "@/components/ConfirmModal";
 import {
   applyBackupSnapshot,

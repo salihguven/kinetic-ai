@@ -1,7 +1,7 @@
 // src/components/LegalModal.js
 "use client";
 
-import { X, Shield, Scale, AlertTriangle, Database, ExternalLink } from "lucide-react";
+import { X, Shield, Scale, AlertTriangle, Database, ExternalLink } from "@/components/KineticIcons";
 
 export default function LegalModal({ isOpen, onClose, darkMode, lang = "tr" }) {
   if (!isOpen) return null;

@@ -67,7 +67,9 @@
 .theme-light [class~="bg-zinc-200"] { background-color: #d2d7df !important; }
 
 body {
-  font-family: var(--font-sans), system-ui, -apple-system, sans-serif;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-weight: 400;
+  line-height: 1.55;
   overscroll-behavior: none;
 }
 
@@ -80,14 +82,47 @@ select {
 }
 
 :focus-visible {
-  outline: 2px solid var(--kinetic-accent);
+  outline: 2px solid color-mix(in srgb, #8b7cf6 66%, transparent);
   outline-offset: 2px;
+}
+
+/* Text entry fields use a restrained focus cue instead of the former bright green frame. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline-color: color-mix(in srgb, #8b7cf6 42%, transparent);
+  outline-offset: 1px;
+}
+
+.chat-composer-input:focus-visible {
+  outline: none;
 }
 
 .touch-target {
   min-width: 48px;
   min-height: 48px;
 }
+
+.markdown-body > :first-child { margin-top: 0; }
+.markdown-body > :last-child { margin-bottom: 0; }
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4 { margin: 2rem 0 0.75rem; color: #fafafa; font-weight: 600; line-height: 1.3; scroll-margin-top: 6rem; }
+.markdown-body h2 { font-size: clamp(1.35rem, 4vw, 1.8rem); }
+.markdown-body h3 { font-size: clamp(1.15rem, 3vw, 1.4rem); }
+.markdown-body p { margin: 1rem 0; }
+.markdown-body ul,
+.markdown-body ol { margin: 1rem 0; padding-left: 1.5rem; }
+.markdown-body ul { list-style: disc; }
+.markdown-body ol { list-style: decimal; }
+.markdown-body li { margin: 0.4rem 0; padding-left: 0.25rem; }
+.markdown-body a { color: #c4b5fd; text-decoration: underline; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.markdown-body blockquote { margin: 1.25rem 0; border-left: 3px solid #8b7cf6; padding-left: 1rem; color: #a1a1aa; }
+.markdown-body :not(pre) > code { border: 1px solid rgba(255,255,255,.1); border-radius: .4rem; background: rgba(255,255,255,.06); padding: .12rem .35rem; font-size: .9em; }
+.markdown-body pre { max-width: 100%; overflow-x: auto; border: 1px solid rgba(255,255,255,.1); border-radius: .85rem; background: #05060a; padding: 1rem; font-size: .85em; line-height: 1.65; }
+.markdown-body table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+.markdown-body th,
+.markdown-body td { border: 1px solid rgba(255,255,255,.12); padding: .55rem .75rem; text-align: left; }
 
 /* Sidebar history actions stay compact on desktop and finger-friendly on mobile. */
 .sidebar-chat-action {
@@ -98,11 +133,25 @@ select {
 }
 
 @media (max-width: 767px) {
+  html { scroll-padding-top: 1rem; }
+
+  button,
+  a,
+  input,
+  textarea,
+  select {
+    scroll-margin-block: 1rem;
+  }
+
   .sidebar-chat-action {
     width: 48px;
     height: 48px;
     min-width: 48px;
     min-height: 48px;
+  }
+
+  .mobile-safe-bottom {
+    padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
   }
 }
 

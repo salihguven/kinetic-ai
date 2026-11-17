@@ -1,0 +1,30 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /updates/{userId}/{assetName} {
+      // Update media is public content, but object listing stays private.
+      allow get: if true;
+      allow list: if false;
+
+      // Only Firebase users with the server-assigned admin claim may upload.
+      allow create: if request.auth != null
+        && request.auth.uid == userId
+        && request.auth.token.admin == true
+        && (
+          (request.resource.contentType.matches('image/(jpeg|png|webp|avif)')
+            && request.resource.size <= 8 * 1024 * 1024)
+          ||
+          (request.resource.contentType.matches('video/(mp4|webm|ogg)')
+            && request.resource.size <= 50 * 1024 * 1024)
+        );
+
+      // Media objects are immutable after upload.
+      allow update, delete: if false;
+    }
+
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

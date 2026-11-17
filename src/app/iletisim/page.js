@@ -14,9 +14,11 @@ export default function ContactPage() {
         <p className="text-xs font-bold uppercase tracking-[3px] text-emerald-400">True Kinetic Studios</p>
         <h1 className="text-3xl font-black text-white sm:text-4xl">İletişim</h1>
         <p>KineticAI desteği, güvenlik bildirimi, gizlilik talebi, telif bildirimi veya ürün öneriniz için e-posta gönderin. Mesajınızda ilgili sayfayı ve karşılaştığınız sorunu anlatmanız çözüm sürecini kolaylaştırır.</p>
+        <p>Ürün hatası veya özellik önerisi için yapılandırılmış bildirim formunu kullanarak ekibe doğrudan kayıt bırakabilirsiniz.</p>
+        <p><Link className="inline-flex min-h-12 items-center rounded-xl border border-white/10 px-4 text-sm font-medium text-white hover:bg-white/[0.06]" href="/geri-bildirim">Geri bildirim veya hata bildir →</Link></p>
         <p>
           <span className="font-semibold text-white">E-posta: </span>
-          <a className="text-emerald-300 underline underline-offset-2" href="mailto:info@truekinetichub.com.tr?subject=KineticAI%20ileti%C5%9Fim">info@truekinetichub.com.tr</a>
+          <a className="text-emerald-300 underline underline-offset-2" href="mailto:truekineticservices@gmail.com?subject=KineticAI%20ileti%C5%9Fim">truekineticservices@gmail.com</a>
         </p>
         <p className="text-sm text-gray-500">Kişisel bilgilerin nasıl işlendiğini <a className="text-emerald-300 underline" href="/gizlilik-politikasi">Gizlilik Politikası</a> sayfasında bulabilirsiniz.</p>
       </article>

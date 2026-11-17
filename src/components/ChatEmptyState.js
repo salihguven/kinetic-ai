@@ -1,7 +1,7 @@
 // src/components/ChatEmptyState.js
 "use client";
 
-import { Plus, MessageSquare, Code2, Mail, Globe } from "lucide-react";
+import { Plus, MessageSquare, Code2, Mail, Globe } from "@/components/KineticIcons";
 import KineticLogo from "./KineticLogo";
 
 function getGreeting(lang) {

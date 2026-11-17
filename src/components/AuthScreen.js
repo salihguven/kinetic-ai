@@ -20,7 +20,7 @@ import {
   Loader2,
   Sun,
   Moon,
-} from "lucide-react";
+} from "@/components/KineticIcons";
 import KineticLogo from "./KineticLogo";
 import BetaBadge from "./BetaBadge";
 import LegalModal from "./LegalModal";
@@ -47,8 +47,8 @@ function translateFirebaseError(code) {
   }
 }
 
-export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) {
-  const [isRegister, setIsRegister] = useState(false);
+export default function AuthScreen({ darkMode, setDarkMode, embedded = false, initialMode = "login" }) {
+  const [isRegister, setIsRegister] = useState(initialMode === "register");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -126,7 +126,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
 
   const card = (
     <div className="relative mx-auto w-full max-w-md">
-      <div className={`rounded-2xl border p-7 backdrop-blur-md transition-all ${cardClass}`}>
+      <div className={`rounded-2xl border p-5 backdrop-blur-md transition-all sm:p-7 ${cardClass}`}>
         <div className="mb-6 flex flex-col items-center text-center">
           <div className="mb-3">
             <KineticLogo size={44} darkMode={darkMode} />
@@ -152,7 +152,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
               setError("");
               setInfoMsg("");
             }}
-            className={`rounded-lg py-2 transition ${
+            className={`min-h-11 rounded-lg py-2 transition ${
               !isRegister
                 ? darkMode
                   ? "bg-zinc-800 text-white"
@@ -169,7 +169,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
               setError("");
               setInfoMsg("");
             }}
-            className={`rounded-lg py-2 transition ${
+            className={`min-h-11 rounded-lg py-2 transition ${
               isRegister
                 ? darkMode
                   ? "bg-zinc-800 text-white"
@@ -185,7 +185,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
           type="button"
           onClick={handleGoogleLogin}
           disabled={loading}
-          className={`mb-4 flex w-full items-center justify-center gap-2 rounded-xl border py-2.5 text-xs font-medium transition ${
+          className={`mb-4 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border py-2.5 text-xs font-medium transition ${
             darkMode
               ? "border-zinc-700 bg-zinc-950 hover:bg-zinc-800"
               : "border-zinc-300 bg-white hover:bg-zinc-50"
@@ -213,7 +213,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Adınız"
-                  className={`w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none ${inputClass}`}
+                  className={`min-h-12 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none ${inputClass}`}
                 />
               </div>
             </div>
@@ -229,7 +229,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="ornek@mail.com"
-                className={`w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none ${inputClass}`}
+                className={`min-h-12 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none ${inputClass}`}
               />
             </div>
           </div>
@@ -255,7 +255,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="En az 6 karakter"
-                className={`w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none ${inputClass}`}
+                className={`min-h-12 w-full rounded-xl border py-2 pl-9 pr-3 text-sm outline-none ${inputClass}`}
               />
             </div>
           </div>
@@ -298,7 +298,7 @@ export default function AuthScreen({ darkMode, setDarkMode, embedded = false }) 
           <button
             type="submit"
             disabled={loading}
-            className={`flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition disabled:opacity-50 ${
+            className={`flex min-h-12 w-full items-center justify-center gap-2 rounded-xl py-2.5 text-sm font-semibold transition disabled:opacity-50 ${
               darkMode
                 ? "bg-white text-zinc-950 hover:bg-zinc-200"
                 : "bg-zinc-900 text-white hover:bg-zinc-800"

@@ -1,5 +1,6 @@
 import { collection, getDocs, limit, query, where } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { normalizePublicUpdate } from "@/lib/updateContent";
 
 export async function loadPublishedUpdates() {
   const updatesQuery = query(
@@ -10,16 +11,7 @@ export async function loadPublishedUpdates() {
   const snapshot = await getDocs(updatesQuery);
 
   return snapshot.docs
-    .map((entry) => {
-      const data = entry.data();
-      return {
-        id: entry.id,
-        title: data.title || "",
-        description: data.description || "",
-        version: data.version || "",
-        createdAt: data.createdAt?.toDate?.()?.toISOString() || null,
-      };
-    })
+    .map((entry) => normalizePublicUpdate(entry.id, entry.data()))
     .sort((a, b) => Date.parse(b.createdAt || "") - Date.parse(a.createdAt || ""))
     .slice(0, 50);
 }
