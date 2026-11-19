@@ -30,6 +30,7 @@ import {
   MAX_NOTE_SOURCES,
 } from "@/lib/sourceLimits";
 import { getReasoningSupport } from "@/lib/reasoning";
+import { notifyWorkspaceChanged, WORKSPACE_REPLACED_EVENT } from "@/lib/workspaceCloud";
 
 export default function NotebookStudio({ activeProjectId = "default", projects = [], activeProvider, onAskAI, darkMode, lang = "tr", reasoningLevel = "auto" }) {
   const [sources, setSources] = useState([]);
@@ -51,7 +52,7 @@ export default function NotebookStudio({ activeProjectId = "default", projects =
   const projectSources = sources.filter((source) => source.projectId === activeProjectId);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
+    const restoreSources = () => {
       try {
         const saved = localStorage.getItem("kinetic_ai_notes");
         if (saved) {
@@ -75,14 +76,20 @@ export default function NotebookStudio({ activeProjectId = "default", projects =
       } finally {
         setSourcesLoaded(true);
       }
-    });
-    return () => window.cancelAnimationFrame(frame);
+    };
+    const frame = window.requestAnimationFrame(restoreSources);
+    window.addEventListener(WORKSPACE_REPLACED_EVENT, restoreSources);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener(WORKSPACE_REPLACED_EVENT, restoreSources);
+    };
   }, [lang]);
 
   useEffect(() => {
     if (!sourcesLoaded) return;
     try {
       localStorage.setItem("kinetic_ai_notes", JSON.stringify(sources));
+      notifyWorkspaceChanged();
     } catch {
       // ignore
     }

@@ -85,6 +85,13 @@ import {
   normalizeProjects,
   moveProjectItems,
 } from "@/lib/workspaceProjects";
+import {
+  applyCloudWorkspace,
+  createWorkspaceSnapshot,
+  loadCloudWorkspace,
+  saveCloudWorkspace,
+  WORKSPACE_CHANGED_EVENT,
+} from "@/lib/workspaceCloud";
 
 const ASSISTANT_PRESETS = {
   general: {
@@ -195,6 +202,8 @@ export default function HomeClient() {
   const [editingChatId, setEditingChatId] = useState("");
   const [editingChatTitle, setEditingChatTitle] = useState("");
   const [isLoaded, setIsLoaded] = useState(false);
+  const [cloudWorkspaceReady, setCloudWorkspaceReady] = useState(false);
+  const [workspaceChangeTick, setWorkspaceChangeTick] = useState(0);
 
   const [activeProviderId, setActiveProviderId] = useState("");
   const [reasoningLevel, setReasoningLevel] = useState("auto");
@@ -241,6 +250,7 @@ export default function HomeClient() {
   const fileInputRef = useRef(null);
   const abortControllerRef = useRef(null);
   const speechRecognitionRef = useRef(null);
+  const workspaceSaveTimerRef = useRef(null);
 
   useEffect(() => () => speechRecognitionRef.current?.stop(), []);
 
@@ -282,6 +292,12 @@ export default function HomeClient() {
   }, []);
 
   useEffect(() => {
+    const handleWorkspaceChange = () => setWorkspaceChangeTick((value) => value + 1);
+    window.addEventListener(WORKSPACE_CHANGED_EVENT, handleWorkspaceChange);
+    return () => window.removeEventListener(WORKSPACE_CHANGED_EVENT, handleWorkspaceChange);
+  }, []);
+
+  useEffect(() => {
     if (!reasoningLoaded) return;
     try {
       localStorage.setItem("kinetic_ai_reasoning_level", reasoningLevel);
@@ -302,6 +318,85 @@ export default function HomeClient() {
     const timer = window.setTimeout(() => setClockNow(Date.now()), 0);
     return () => window.clearTimeout(timer);
   }, []);
+
+  // Cloud data is fetched once on sign-in. Local data remains an offline fallback;
+  // the cloud copy becomes the source when it exists for this account.
+  useEffect(() => {
+    if (!firebaseUser || !isLoaded) {
+      setCloudWorkspaceReady(false);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const workspace = await loadCloudWorkspace(db, firebaseUser.uid);
+        if (!workspace || cancelled) return;
+        applyCloudWorkspace(workspace);
+        const restoredProjects = normalizeProjects(workspace.projects || []);
+        const restoredChats = normalizeProjectItems(workspace.chats || [], restoredProjects);
+        const restoredProjectId = restoredProjects.some((item) => item.id === workspace.activeProjectId)
+          ? workspace.activeProjectId
+          : DEFAULT_PROJECT_ID;
+        const restoredChatsWithFallback = restoredChats.length
+          ? restoredChats
+          : [createEmptyChat(restoredProjectId)];
+        const preferences = workspace.preferences || {};
+        setProjects(restoredProjects);
+        setChats(restoredChatsWithFallback);
+        setActiveProjectId(restoredProjectId);
+        setActiveChatId(restoredChatsWithFallback.find((chat) => chat.projectId === restoredProjectId)?.id || restoredChatsWithFallback[0].id);
+        if (preferences.lang === "tr" || preferences.lang === "en") setLang(preferences.lang);
+        if (preferences.theme === "dark" || preferences.theme === "light") setDarkMode(preferences.theme === "dark");
+        if (typeof preferences.reasoningLevel === "string") setReasoningLevel(normalizeReasoningLevel(preferences.reasoningLevel));
+        if (preferences.assistantSettings && typeof preferences.assistantSettings === "object") {
+          const settings = preferences.assistantSettings;
+          if (Object.hasOwn(ASSISTANT_PRESETS, settings.assistantPreset)) setAssistantPreset(settings.assistantPreset);
+          if (typeof settings.customInstruction === "string") setCustomInstruction(settings.customInstruction.slice(0, 3000));
+          if (typeof settings.autoFallback === "boolean") setAutoFallback(settings.autoFallback);
+          if (typeof settings.chainMode === "boolean") setChainMode(settings.chainMode);
+          if (Object.hasOwn(BRIDGE_MODES, settings.bridgeRole)) setBridgeRole(settings.bridgeRole);
+          if (typeof settings.secondaryProviderId === "string") setSecondaryProviderId(settings.secondaryProviderId);
+        }
+        setWorkspaceDataVersion((value) => value + 1);
+      } catch {
+        // Firestore may be temporarily unavailable. The local workspace remains usable.
+      } finally {
+        if (!cancelled) setCloudWorkspaceReady(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [firebaseUser, isLoaded]);
+
+  useEffect(() => {
+    if (!firebaseUser || !isLoaded || !cloudWorkspaceReady) return;
+    window.clearTimeout(workspaceSaveTimerRef.current);
+    workspaceSaveTimerRef.current = window.setTimeout(() => {
+      const assistantSettings = {
+        assistantPreset,
+        customInstruction: customInstruction.slice(0, 3000),
+        autoFallback,
+        chainMode,
+        bridgeRole,
+        secondaryProviderId,
+      };
+      const payload = createWorkspaceSnapshot({
+        chats,
+        projects,
+        activeProjectId,
+        preferences: {
+          lang,
+          theme: darkMode ? "dark" : "light",
+          reasoningLevel,
+          assistantSettings,
+          notifications: notificationsEnabled ? "on" : "off",
+        },
+      });
+      saveCloudWorkspace(db, firebaseUser.uid, payload).catch(() => {
+        // The local copy is intentionally retained if the network is unavailable.
+      });
+    }, 900);
+    return () => window.clearTimeout(workspaceSaveTimerRef.current);
+  }, [firebaseUser, isLoaded, cloudWorkspaceReady, chats, projects, activeProjectId, lang, darkMode, reasoningLevel, assistantPreset, customInstruction, autoFallback, chainMode, bridgeRole, secondaryProviderId, notificationsEnabled, workspaceChangeTick]);
   const projectChats = chats.filter((chat) => chat.projectId === activeProjectId);
   const projectChatCounts = Object.fromEntries(projects.map((project) => [
     project.id,

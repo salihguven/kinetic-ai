@@ -16,6 +16,7 @@ import {
 import ConfirmModal from "./ConfirmModal";
 import { TRANSLATIONS } from "@/lib/i18n";
 import { formatFriendlyError } from "@/lib/uxHelpers";
+import { notifyWorkspaceChanged, WORKSPACE_REPLACED_EVENT } from "@/lib/workspaceCloud";
 
 export default function TaskManager({ activeProjectId = "default", projects = [], activeProvider, onAskAI, darkMode, lang = "tr", reasoningLevel = "auto" }) {
   const [tasks, setTasks] = useState([]);
@@ -35,7 +36,7 @@ export default function TaskManager({ activeProjectId = "default", projects = []
   const projectTasks = tasks.filter((task) => task.projectId === activeProjectId);
 
   useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
+    const restoreTasks = () => {
       try {
         const saved = localStorage.getItem("kinetic_ai_tasks");
         if (saved) {
@@ -49,14 +50,20 @@ export default function TaskManager({ activeProjectId = "default", projects = []
       } finally {
         setTasksLoaded(true);
       }
-    });
-    return () => window.cancelAnimationFrame(frame);
+    };
+    const frame = window.requestAnimationFrame(restoreTasks);
+    window.addEventListener(WORKSPACE_REPLACED_EVENT, restoreTasks);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener(WORKSPACE_REPLACED_EVENT, restoreTasks);
+    };
   }, []);
 
   useEffect(() => {
     if (!tasksLoaded) return;
     try {
       localStorage.setItem("kinetic_ai_tasks", JSON.stringify(tasks));
+      notifyWorkspaceChanged();
     } catch {
       // ignore
     }

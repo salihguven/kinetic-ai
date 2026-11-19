@@ -66,6 +66,18 @@ service cloud.firestore {
       // Account deletion is handled by the authenticated server endpoint.
       allow delete: if false;
 
+      // Workspace content is private to its owner. API connections are deliberately
+      // kept out of this document; their keys remain in the user's browser.
+      match /workspace/{workspaceId} {
+        allow get: if isOwner(userId);
+        allow list: if false;
+        allow create, update: if isOwner(userId)
+          && request.resource.data.keys().hasOnly(['schemaVersion', 'payload', 'updatedAt'])
+          && request.resource.data.schemaVersion == 1
+          && request.resource.data.payload is map;
+        allow delete: if false;
+      }
+
       match /{document=**} {
         allow read, write: if false;
       }
